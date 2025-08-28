@@ -10,6 +10,7 @@ import os
 import csv
 
 from argparse import ArgumentParser
+from collections import defaultdict
 from datetime import datetime
 from math import floor
 from typing import Optional, Type
@@ -29,6 +30,8 @@ from protocol_proxy.proxy import launch
 from protocol_proxy.proxy.asyncio import AsyncioProtocolProxy
 
 logging.basicConfig(filename='/tmp/bacnet_proxy.log', level=logging.DEBUG,
+from .json import serialize
+
                     format='%(asctime)s - %(message)s')
 _log = logging.getLogger(__name__)
 
@@ -46,6 +49,7 @@ class BACnetProxy(AsyncioProtocolProxy):
         self._object_list_cache = {}
         self._cache_timeout = 300
 
+        self.register_callback(self.batch_read_endpoint, 'BATCH_READ', provides_response=True)
         self.register_callback(self.confirmed_private_transfer_endpoint, 'CONFIRMED_PRIVATE_TRANSFER', provides_response=True)
         self.register_callback(self.query_device_endpoint, 'QUERY_DEVICE', provides_response=True)
         self.register_callback(self.read_property_endpoint, 'READ_PROPERTY', provides_response=True)
@@ -61,34 +65,6 @@ class BACnetProxy(AsyncioProtocolProxy):
         self.register_callback(self.clear_cache_endpoint, 'CLEAR_CACHE', provides_response=True)
         self.register_callback(self.get_cache_stats_endpoint, 'GET_CACHE_STATS', provides_response=True)
 
-    def _handle_bacnet_response(self, result):
-        """Helper method to handle BACnet responses and convert errors to JSON-serializable format."""
-        if isinstance(result, AbortPDU):
-            return {
-                "error": "AbortPDU",
-                "reason": str(result.apduAbortRejectReason) if hasattr(result, 'apduAbortRejectReason') else "Unknown abort reason",
-                "details": str(result)
-            }
-        elif isinstance(result, ErrorPDU):
-            return {
-                "error": "ErrorPDU", 
-                "error_class": str(result.errorClass) if hasattr(result, 'errorClass') else "Unknown",
-                "error_code": str(result.errorCode) if hasattr(result, 'errorCode') else "Unknown",
-                "details": str(result)
-            }
-        elif isinstance(result, RejectPDU):
-            return {
-                "error": "RejectPDU",
-                "reason": str(result.apduAbortRejectReason) if hasattr(result, 'apduAbortRejectReason') else "Unknown reject reason",
-                "details": str(result)
-            }
-        elif isinstance(result, ErrorRejectAbortNack):
-            return {
-                "error": "ErrorRejectAbortNack",
-                "details": str(result)
-            }
-        else:
-            return result
         
     def save_discovered_device(self, device_info: dict, network_str: str, scan_method: str = "unknown"):
         """Save a discovered device to CSV cache."""
@@ -216,6 +192,15 @@ class BACnetProxy(AsyncioProtocolProxy):
             return []
 
     @callback
+    async def batch_read_endpoint(self, _, raw_message: bytes):
+        """Endpoint to gracefully handle read multiple with fallback to single reads."""
+        message = json.loads(raw_message.decode('utf8'))
+        address = message['device_address']
+        read_specifications = message['read_specifications']
+        result = await self.bacnet.batch_read(address, read_specifications)
+        return serialize(result)
+
+    @callback
     async def confirmed_private_transfer_endpoint(self, _, raw_message: bytes):
         """Endpoint for confirmed private transfer."""
         message = json.loads(raw_message.decode('utf8'))
@@ -225,7 +210,7 @@ class BACnetProxy(AsyncioProtocolProxy):
         # TODO: from_json may be an AI hallucination. Need to check this.
         service_parameters = TagList.from_json(message.get('service_parameters', []))
         result = await self.bacnet.confirmed_private_transfer(address, vendor_id, service_number, service_parameters)
-        return json.dumps(result).encode('utf8')
+        return serialize(result)
 
     @callback
     async def query_device_endpoint(self, _, raw_message: bytes):
@@ -234,10 +219,7 @@ class BACnetProxy(AsyncioProtocolProxy):
         address = message['address']
         property_name = message.get('property_name', 'object-identifier')
         result = await self.bacnet.query_device(address, property_name)
-        
-        # Handle BACnet responses (including errors)
-        handled_result = self._handle_bacnet_response(result)
-        return json.dumps(handled_result).encode('utf8')
+        return serialize(result)
 
     @callback
     async def read_property_endpoint(self, _, raw_message: bytes):
@@ -248,38 +230,7 @@ class BACnetProxy(AsyncioProtocolProxy):
         property_identifier = message['property_identifier']
         property_array_index = message.get('property_array_index', None)
         result = await self.bacnet.read_property(address, object_identifier, property_identifier, property_array_index)
-        def make_jsonable(val):
-            if isinstance(val, (list, tuple)):
-                return [make_jsonable(v) for v in val]
-            if isinstance(val, (bytes, bytearray)):
-                return val.hex()
-            if hasattr(val, 'as_tuple'):
-                return str(val)
-            if hasattr(val, '__dict__') and not isinstance(val, type):
-                return {k: make_jsonable(v) for k, v in val.__dict__.items()}
-            if hasattr(val, '__class__') and 'Error' in val.__class__.__name__:
-                return str(val)
-            import ipaddress
-            if isinstance(val, (ipaddress.IPv4Address, ipaddress.IPv6Address)):
-                return str(val)
-            return val
-        jsonable_result = make_jsonable(result)
-        try:
-            if isinstance(result, ErrorRejectAbortNack):
-                error_response = {
-                    "error": type(result).__name__,
-                    "details": str(result)
-                }
-                return json.dumps(error_response).encode('utf8')
-            return json.dumps(jsonable_result).encode('utf8')
-        except TypeError as e:
-            error_response = {
-                "error": "SerializationError",
-                "details": str(e),
-                "raw_type": str(type(result)),
-                "raw_str": str(result)
-            }
-            return json.dumps(error_response).encode('utf8')
+        return serialize(result)
 
     @callback
     async def read_property_multiple_endpoint(self, _, raw_message: bytes):
@@ -288,10 +239,7 @@ class BACnetProxy(AsyncioProtocolProxy):
         address = message['device_address']
         read_specifications = message['read_specifications']
         result = await self.bacnet.read_property_multiple(address, read_specifications)
-        
-        # Handle BACnet responses (including errors)
-        handled_result = self._handle_bacnet_response(result)
-        return json.dumps(handled_result).encode('utf8')
+        return serialize(result)
 
     @callback
     async def send_object_user_lock_time_endpoint(self, _, raw_message: bytes):
@@ -302,7 +250,7 @@ class BACnetProxy(AsyncioProtocolProxy):
         object_id = message['object_id']
         lock_interval = message['lock_interval']
         result = await self.bacnet.send_object_user_lock_time(address, device_id, object_id, lock_interval)
-        return json.dumps(result).encode('utf8')
+        return serialize(result)
 
     @callback
     async def time_synchronization_endpoint(self, _, raw_message: bytes):
@@ -311,7 +259,7 @@ class BACnetProxy(AsyncioProtocolProxy):
         address = Address(message['address'])
         date_time = datetime.fromisoformat(message['date_time']) if hasattr(message, 'date_time') else None
         result = await self.bacnet.send_object_user_lock_time(address, date_time)
-        return json.dumps(result).encode('utf8')
+        return serialize(result)
 
     @callback
     async def write_property_endpoint(self, _, raw_message: bytes):
@@ -325,7 +273,7 @@ class BACnetProxy(AsyncioProtocolProxy):
         property_array_index = message.get('property_array_index', None)
         result = await self.bacnet.write_property(address, object_identifier, property_identifier, value, priority,
                                             property_array_index)
-        return json.dumps(result).encode('utf8')
+        return serialize(result)
 
     @callback
     async def write_property_multiple_endpoint(self, _, raw_message: bytes):
@@ -333,8 +281,8 @@ class BACnetProxy(AsyncioProtocolProxy):
         message = json.loads(raw_message.decode('utf8'))
         address = message['device_address']
         write_specifications = message['write_specifications']
-        result = await self.bacnet.read_property(address, write_specifications)
-        return json.dumps(result).encode('utf8')
+        result = await self.bacnet.write_property_multiple(address, write_specifications)
+        return serialize(result)
 
     @callback
     async def read_device_all_endpoint(self, _, raw_message: bytes):
@@ -344,22 +292,11 @@ class BACnetProxy(AsyncioProtocolProxy):
             device_address = message['device_address']
             device_object_identifier = message['device_object_identifier']
             result = await self.read_device_all(device_address, device_object_identifier)
-            if not result:
-                return json.dumps({"error": "No data returned from read_device_all"}).encode('utf8')
-            def make_jsonable(val):
-                if isinstance(val, (str, int, float, bool)):
-                    return val
-                if isinstance(val, (list, tuple, set)):
-                    return [make_jsonable(v) for v in val]
-                if isinstance(val, (bytes, bytearray)):
-                    return val.hex()
-                if hasattr(val, '__dict__') and not isinstance(val, type):
-                    return {str(k): make_jsonable(v) for k, v in val.__dict__.items()}
-                # TODO: Replace this forced string conversion with proper BACnet object serialization
-                return f"FORCED:{str(val)}"
-            jsonable_result = {str(k): make_jsonable(v) for k, v in result.items()}
-            return json.dumps(jsonable_result).encode('utf8')
+            # if not result:  # TODO: Is there really a good reason to fill in a value here? This isn't really an error.
+            #     return json.dumps({"error": "No data returned from read_device_all"}).encode('utf8')
+            return serialize(result)
         except Exception as e:
+            # TODO: Should we handle this with serialize, instead?
             tb = traceback.format_exc()
             return json.dumps({"error": str(e), "traceback": tb}).encode('utf8')
 
@@ -370,9 +307,9 @@ class BACnetProxy(AsyncioProtocolProxy):
         device_instance_low = message.get('device_instance_low', 0)
         device_instance_high = message.get('device_instance_high', 4194303)
         dest = message.get('dest', '255.255.255.255:47808')
-        apdu_timeout = message.get('apdu_timeout', None)  # Keep for backward compatibility but don't use
+        apdu_timeout = message.get('apdu_timeout', None)  # Keep for backward compatibility but don't use  # TODO: Why!?
         result = await self.who_is(device_instance_low, device_instance_high, dest)
-        return json.dumps(result).encode('utf8')
+        return serialize(result)
 
     @callback
     async def scan_subnet_endpoint(self, _, raw_message: bytes):
@@ -413,8 +350,9 @@ class BACnetProxy(AsyncioProtocolProxy):
                 max_duration=max_duration,
                 force_fresh_scan=force_fresh_scan
             )
-            return json.dumps(result).encode('utf8')
+            return serialize(result)
         except Exception as e:
+            # TODO: Should we handle this with serialize, instead?
             _log.error(f"scan_subnet_endpoint error: {e}")
             return json.dumps({"error": str(e)}).encode('utf8')
 
@@ -433,6 +371,7 @@ class BACnetProxy(AsyncioProtocolProxy):
             
             # Check if the BACnet application is still connected
             if not hasattr(self.bacnet, 'app') or self.bacnet.app is None:
+                # TODO: Should we handle this with serialize, instead?
                 return json.dumps({"status": "error", "error": "BACnet application not available"}).encode('utf8')
             
             result = await self.read_object_list_names_paginated(device_address, device_object_identifier, page, page_size, force_fresh_read)
@@ -441,9 +380,11 @@ class BACnetProxy(AsyncioProtocolProxy):
             
             # Check for error in the result
             if result.get('status') == 'error':
+                # TODO: Should we handle this with serialize, instead?
                 logging.getLogger(__name__).error(f"Error in read_object_list_names_paginated: {result['error']}")
                 return json.dumps(result).encode('utf8')
-            
+
+            # TODO: Why is this turning all ints into engineering units?
             def make_jsonable(val):
                 if isinstance(val, (str, int, float, bool)):
                     # Special handling for integer units - convert to EngineeringUnits name
@@ -552,14 +493,14 @@ class BACnetProxy(AsyncioProtocolProxy):
         else:
             self._object_list_cache.clear()
             result = {"status": "success", "message": "All cache cleared"}
-        
+        # TODO: These results do not seem to follow quite the same format as others.
         return json.dumps(result).encode('utf8')
 
     @callback
     async def get_cache_stats_endpoint(self, _, raw_message: bytes):
         """Endpoint for getting cache statistics."""
         result = self._get_cache_stats()
-        return json.dumps(result).encode('utf8')
+        return serialize(result)
 
     @classmethod
     def get_unique_remote_id(cls, unique_remote_id: tuple) -> tuple:
@@ -1214,6 +1155,22 @@ class BACnet:
         return await self.read_property(device_address=address, object_identifier='device:4194303',
                                         property_identifier=property_name)
 
+    async def batch_read(self, device_address: str, read_specifications: dict[str, dict]):
+        daopr_list = [
+            DeviceAddressObjectPropertyReference(
+                key=key,
+                device_address=device_address,
+                object_identifier=spec['object_id'],
+                property_reference=(spec['property'], spec['array_index'])
+                    if spec['array_index'] is not None else spec['property']
+            ) for key, spec in read_specifications.items()
+        ]
+        results = {}
+        batch = BatchRead(daopr_list)
+        # run until the batch is done
+        await batch.run(self.app, lambda k, v: results.update({k: v}))
+        return results
+
     async def read_property(self, device_address: str, object_identifier: str, property_identifier: str,
                    property_array_index: int | None = None):
         try:
@@ -1233,7 +1190,7 @@ class BACnet:
         _log.debug(f"BACnet.read_property final response: {response}")
         return response
 
-    async def read_property_multiple(self, device_address: str, read_specifications: list):
+    async def read_property_multiple(self, device_address: str, read_specifications: dict):
         try:  # TODO: Do we need to fall back to read_property in loop? How to detect that? Should it be in driver instead?
             _log.debug(f'Reading one or more properties at {device_address}: {read_specifications}')
             # spec_list = []
