@@ -2,18 +2,19 @@ import asyncio
 import ipaddress
 import json
 import logging
-import re
 import sys
 import time
 import traceback
-import os
 import csv
 
 from argparse import ArgumentParser
 from collections import defaultdict
+from collections.abc import Callable
+from dataclasses import dataclass
 from datetime import datetime
+from functools import partial
 from math import floor
-from typing import Optional, Type
+from typing import Type
 
 from bacpypes3.app import Application
 from bacpypes3.basetypes import DateTime, PropertyReference
@@ -22,19 +23,31 @@ from bacpypes3.lib.batchread import BatchRead, DeviceAddressObjectPropertyRefere
 from bacpypes3.pdu import Address, PDUData
 from bacpypes3.apdu import (ConfirmedPrivateTransferACK, ConfirmedPrivateTransferError, ConfirmedPrivateTransferRequest,
                             ErrorRejectAbortNack, TimeSynchronizationRequest, AbortPDU, ErrorPDU, RejectPDU)
-from bacpypes3.primitivedata import ClosingTag, Date, Null, ObjectIdentifier, ObjectType, OpeningTag, Tag, TagList, Time
+from bacpypes3.primitivedata import ClosingTag, Date, Null, ObjectIdentifier, ObjectType, OpeningTag, Tag, TagList, \
+    Time, PropertyIdentifier
 from bacpypes3.vendor import get_vendor_info
 
-from protocol_proxy.ipc import callback
+from protocol_proxy.ipc import callback, ProtocolProxyMessage
 from protocol_proxy.proxy import launch
 from protocol_proxy.proxy.asyncio import AsyncioProtocolProxy
 
-logging.basicConfig(filename='/tmp/bacnet_proxy.log', level=logging.DEBUG,
 from .json import serialize
 
+logging.basicConfig(filename=f'/home/dmr/Scratch/driver_test10/.volttron/bacnet_proxy.log', level=logging.DEBUG,
                     format='%(asctime)s - %(message)s')
 _log = logging.getLogger(__name__)
 
+@dataclass
+class COVSubscription:
+    address: str
+    object_identifier: str
+    confirmed: bool | None
+    lifetime: bool | None
+    stop_event: asyncio.Event = asyncio.Event()
+
+    def is_unchanged(self, address: str, object_identifier: str, confirmed: bool | None, lifetime: bool | None) -> bool:
+        return (address == self.address and object_identifier == self.object_identifier
+                and confirmed == confirmed and lifetime == lifetime)
 
 class BACnetProxy(AsyncioProtocolProxy):
     def __init__(self, local_device_address, bacnet_network=0, vendor_id=999, object_name='VOLTTRON BACnet Proxy',
@@ -48,9 +61,12 @@ class BACnetProxy(AsyncioProtocolProxy):
         # Format: {device_key: (object_list, timestamp)}
         self._object_list_cache = {}
         self._cache_timeout = 300
+        self._subscribed_cov: dict[str, COVSubscription] = {}
 
         self.register_callback(self.batch_read_endpoint, 'BATCH_READ', provides_response=True)
         self.register_callback(self.confirmed_private_transfer_endpoint, 'CONFIRMED_PRIVATE_TRANSFER', provides_response=True)
+        self.register_callback(self.cov_setup_endpoint, 'SETUP_COV', provides_response=False)
+        self.register_callback(self.cov_cancel_endpoint, 'CANCEL_COV', provides_response=False)
         self.register_callback(self.query_device_endpoint, 'QUERY_DEVICE', provides_response=True)
         self.register_callback(self.read_property_endpoint, 'READ_PROPERTY', provides_response=True)
         self.register_callback(self.read_property_multiple_endpoint, 'READ_PROPERTY_MULTIPLE', provides_response=True)
@@ -211,6 +227,47 @@ class BACnetProxy(AsyncioProtocolProxy):
         service_parameters = TagList.from_json(message.get('service_parameters', []))
         result = await self.bacnet.confirmed_private_transfer(address, vendor_id, service_number, service_parameters)
         return serialize(result)
+
+    async def cov_callback_function(self, peer, key, value):
+        message = ProtocolProxyMessage(
+            method_name='RECEIVE_COV',
+            payload=serialize({key: value})
+            )
+        _log.debug(f'@@@@@@ SENDING COV CALLBACK: {message}')
+        await self.send(peer, message)
+
+    @callback
+    async def cov_setup_endpoint(self, headers, raw_message: bytes):
+        """Endpoint for starting or modifying change of value subscription."""
+        peer = self.peers.get(headers.sender_id)
+        message = json.loads(raw_message.decode('utf8'))
+        key = message['subscription_key']
+        address = message['device_address']
+        object_identifier = message['monitored_object_identifier']
+        property_identifier = message['property_identifier']
+        confirmed = message['issue_confirmed_notifications']
+        lifetime = message['lifetime']
+        if existing := self._subscribed_cov.get(key):
+            if existing.is_unchanged(address, object_identifier, confirmed, lifetime):
+                return
+            else:
+                existing.stop_event.set()
+                self._subscribed_cov.pop(key)
+        # TODO: What happens if remote has existing subscription that was lost on this end?
+        self._subscribed_cov[key] = COVSubscription(address, object_identifier, confirmed, lifetime)
+        cov_callback = partial(self.cov_callback_function, peer, key)
+        self.loop.create_task(self.bacnet.change_of_value(device_address=address, object_identifier=object_identifier,
+                                          process_identifier=None, confirmed=confirmed, lifetime=lifetime,
+                                          stop_event=self._subscribed_cov[key].stop_event, cov_callback=cov_callback,
+                                                          property_identifier=property_identifier
+                                                          ))
+
+    @callback
+    async def cov_cancel_endpoint(self, _, raw_message: bytes):
+        message = json.loads(raw_message.decode('utf8'))
+        key = message['subscription_key']
+        if existing := self._subscribed_cov.pop(key):
+            existing.stop_event.set()
 
     @callback
     async def query_device_endpoint(self, _, raw_message: bytes):
@@ -1171,6 +1228,26 @@ class BACnet:
         await batch.run(self.app, lambda k, v: results.update({k: v}))
         return results
 
+    async def change_of_value(self, device_address: str, object_identifier: str, process_identifier: int | None,
+                              confirmed: bool | None, lifetime: bool | None,
+                              stop_event: asyncio.Event, cov_callback: Callable, property_identifier: str = None):
+        try:
+            property_identifier = PropertyIdentifier(property_identifier)
+            async with self.app.change_of_value(
+                    Address(device_address), ObjectIdentifier(object_identifier),
+                    process_identifier, confirmed, int(lifetime)  # TODO: The context manager should be refreshing automatically. Is it?
+            ) as scm:
+                while not stop_event.is_set():
+                    received_property_identifier, property_value = await scm.get_value()
+                    if not property_identifier or property_identifier == received_property_identifier:
+                        await cov_callback(property_value)
+                # Cancel subscription on stop_event.
+                scm.issue_confirmed_notifications = None
+                scm.lifetime = None
+                scm.refresh_subscription()
+        except Exception as e:
+            _log.warning(f"Exception handling COV: {e}")
+
     async def read_property(self, device_address: str, object_identifier: str, property_identifier: str,
                    property_array_index: int | None = None):
         try:
@@ -1264,6 +1341,7 @@ class BACnet:
 
     async def send_object_user_lock_time(self, address: Address, device_id: str, object_id: str,
                                          lock_interval: int):
+        # TODO: Move this and ObjectUserLockTime to a subclass.
         if lock_interval < 0:
             lock_interval_code = 0xFF
             lock_interval = 0
