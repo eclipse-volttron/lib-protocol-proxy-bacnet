@@ -223,7 +223,8 @@ class BACnetProxy(AsyncioProtocolProxy):
         address = Address(message['address'])
         vendor_id = message['vendor_id']
         service_number = message['service_number']
-        # TODO: from_json may be an AI hallucination. Need to check this.
+        # TODO: from_json appears to be an AI hallucination.
+        #  Need a means to deserialize parameters for TagList or need to not expose this endpoint.
         service_parameters = TagList.from_json(message.get('service_parameters', []))
         result = await self.bacnet.confirmed_private_transfer(address, vendor_id, service_number, service_parameters)
         return serialize(result)
