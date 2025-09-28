@@ -8,7 +8,6 @@ import traceback
 import csv
 
 from argparse import ArgumentParser
-from collections import defaultdict
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
@@ -33,9 +32,8 @@ from protocol_proxy.proxy.asyncio import AsyncioProtocolProxy
 
 from .json import serialize
 
-logging.basicConfig(filename=f'/home/dmr/Scratch/driver_test10/.volttron/bacnet_proxy.log', level=logging.DEBUG,
-                    format='%(asctime)s - %(message)s')
 _log = logging.getLogger(__name__)
+
 
 @dataclass
 class COVSubscription:
