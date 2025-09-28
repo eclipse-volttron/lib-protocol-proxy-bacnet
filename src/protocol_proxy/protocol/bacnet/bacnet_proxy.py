@@ -15,7 +15,7 @@ from functools import partial
 from math import floor
 from typing import Type
 
-from bacpypes3.app import Application
+from bacpypes3.app import Application, ExecutionError
 from bacpypes3.basetypes import DateTime, PropertyReference
 from bacpypes3.constructeddata import AnyAtomic
 from bacpypes3.lib.batchread import BatchRead, DeviceAddressObjectPropertyReference
@@ -1244,6 +1244,16 @@ class BACnet:
                 scm.issue_confirmed_notifications = None
                 scm.lifetime = None
                 scm.refresh_subscription()
+        except ErrorRejectAbortNack as e:
+            # TODO: Should we try again? If so, how often and for how long?
+            # TODO: At the point this is not handled here, the caller should be notified the COV subscription is failed.
+            _log.warning(f"COV subscription to {object_identifier} on {device_address} failed: {e}")
+        except ExecutionError as e:
+            # Catch other potential bacpypes3 errors
+            _log.warning(f"BACpypes3 execution error: {e}")
+        except asyncio.CancelledError:
+            # Handle cleanup if the coroutine is cancelled
+            _log.info(f"COV subscription to {object_identifier} on {device_address} was cancelled.")
         except Exception as e:
             _log.warning(f"Exception handling COV: {e}")
 
