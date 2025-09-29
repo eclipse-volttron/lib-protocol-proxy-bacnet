@@ -54,7 +54,7 @@ classifiers = [
 python = ">=3.10,<4.0"
 bacpypes3 = ">=0.0.102"
 # protocol-proxy = { path = "../lib-protocol-proxy" }
-# protocol-proxy = ">=2.0.0rc0"
+protocol-proxy = ">=2.0.0rc0"
 
 
 [tool.poetry.group.dev.dependencies]
