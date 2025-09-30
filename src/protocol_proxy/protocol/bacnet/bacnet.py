@@ -119,29 +119,29 @@ class BACnet:
         _log.debug(f"BACnet.read_property final response: {response}")
         return response
 
-    async def read_property_multiple(self, device_address: str, read_specifications: dict):
-        try:  # TODO: Do we need to fall back to read_property in loop? How to detect that? Should it be in driver instead?
-            _log.debug(f'Reading one or more properties at {device_address}: {read_specifications}')
-            # spec_list = []
-            # for (object_id, property_id, property_array_index) in read_specifications.values():
-            #     spec_list.extend([
-            #         ObjectIdentifier(object_id),
-            #         property_id])
-            #     if property_array_index is not None:
-            #         spec_list.append(int(property_array_index))
-            response = await self.app.read_property_multiple(
-                Address(device_address),
-                ['analogInput, 3000741',  # TODO: This is hard coded for testing. Make this a parsed input.
-                ['presentValue']]
-            )
-            _log.debug(f'Response is: {response}')
-        except ErrorRejectAbortNack as err:  # TODO: This does not seem to be catching abortPDU errors.
-            _log.debug(f'Error reading property {err}')
-            response = err
-        if isinstance(response, AnyAtomic):  # TODO: The response probably needs to be parsed. See example code.
-            response = response.get_value()
-            # _log.debug(f'Response from read_property_multiple: {response}')
-        return response
+    # async def read_property_multiple(self, device_address: str, read_specifications: dict):
+    #     try:  # TODO: This function is an incomplete stub. Commenting until completed.
+    #         _log.debug(f'Reading one or more properties at {device_address}: {read_specifications}')
+    #         # spec_list = []
+    #         # for (object_id, property_id, property_array_index) in read_specifications.values():
+    #         #     spec_list.extend([
+    #         #         ObjectIdentifier(object_id),
+    #         #         property_id])
+    #         #     if property_array_index is not None:
+    #         #         spec_list.append(int(property_array_index))
+    #         response = await self.app.read_property_multiple(
+    #             Address(device_address),
+    #             ['analogInput, 3000741',  # TODO: This is hard coded for testing. Make this a parsed input.
+    #             ['presentValue']]
+    #         )
+    #         _log.debug(f'Response is: {response}')
+    #     except ErrorRejectAbortNack as err:  # TODO: This does not seem to be catching abortPDU errors.
+    #         _log.debug(f'Error reading property {err}')
+    #         response = err
+    #     if isinstance(response, AnyAtomic):  # TODO: The response probably needs to be parsed. See example code.
+    #         response = response.get_value()
+    #         # _log.debug(f'Response from read_property_multiple: {response}')
+    #     return response
 
     async def write_property(self, device_address: str, object_identifier: str, property_identifier: str, value: Any,
                     priority: int, property_array_index: int | None = None):
@@ -159,9 +159,9 @@ class BACnet:
         except ErrorRejectAbortNack as e:
             print(str(e))
 
-    async def write_property_multiple(self, device_address: str, write_specifications: list):
-        # TODO Implement write_property_multiple.
-        return []
+    # async def write_property_multiple(self, device_address: str, write_specifications: list):
+    #     # TODO Implement write_property_multiple.  Commenting until completed.
+    #     return []
 
     async def time_synchronization(self, device_address: str, date_time: datetime = None):
         date_time = date_time if date_time else datetime.now()

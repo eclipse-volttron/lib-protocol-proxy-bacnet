@@ -48,12 +48,12 @@ class BACnetProxy(AsyncioProtocolProxy):
         self._subscribed_cov: dict[str, COVSubscription] = {}
 
         self.register_callback(self.batch_read_endpoint, 'BATCH_READ', provides_response=True)
-        self.register_callback(self.confirmed_private_transfer_endpoint, 'CONFIRMED_PRIVATE_TRANSFER', provides_response=True)
+        #self.register_callback(self.confirmed_private_transfer_endpoint, 'CONFIRMED_PRIVATE_TRANSFER', provides_response=True)
         self.register_callback(self.cov_setup_endpoint, 'SETUP_COV', provides_response=False)
         self.register_callback(self.cov_cancel_endpoint, 'CANCEL_COV', provides_response=False)
         self.register_callback(self.query_device_endpoint, 'QUERY_DEVICE', provides_response=True)
         self.register_callback(self.read_property_endpoint, 'READ_PROPERTY', provides_response=True)
-        self.register_callback(self.read_property_multiple_endpoint, 'READ_PROPERTY_MULTIPLE', provides_response=True)
+        #self.register_callback(self.read_property_multiple_endpoint, 'READ_PROPERTY_MULTIPLE', provides_response=True)
         self.register_callback(self.time_synchronization_endpoint, 'TIME_SYNCHRONIZATION', provides_response=True)
         self.register_callback(self.write_property_endpoint, 'WRITE_PROPERTY', provides_response=True)
         self.register_callback(self.read_device_all_endpoint, 'READ_DEVICE_ALL', provides_response=True)
@@ -73,18 +73,18 @@ class BACnetProxy(AsyncioProtocolProxy):
         result = await self.bacnet.batch_read(address, read_specifications)
         return serialize(result)
 
-    @callback
-    async def confirmed_private_transfer_endpoint(self, _, raw_message: bytes):
-        """Endpoint for confirmed private transfer."""
-        message = json.loads(raw_message.decode('utf8'))
-        address = Address(message['address'])
-        vendor_id = message['vendor_id']
-        service_number = message['service_number']
-        # TODO: from_json appears to be an AI hallucination.
-        #  Need a means to deserialize parameters for TagList or need to not expose this endpoint.
-        service_parameters = TagList.from_json(message.get('service_parameters', []))
-        result = await self.bacnet.confirmed_private_transfer(address, vendor_id, service_number, service_parameters)
-        return serialize(result)
+    # @callback
+    # async def confirmed_private_transfer_endpoint(self, _, raw_message: bytes):
+    #     """Endpoint for confirmed private transfer."""
+    #     message = json.loads(raw_message.decode('utf8'))
+    #     address = Address(message['address'])
+    #     vendor_id = message['vendor_id']
+    #     service_number = message['service_number']
+    #     # TODO: from_json appears not to exist.
+    #     #  Need a means to deserialize parameters for TagList. Commenting endpoint until fixed.
+    #     service_parameters = TagList.from_json(message.get('service_parameters', []))
+    #     result = await self.bacnet.confirmed_private_transfer(address, vendor_id, service_number, service_parameters)
+    #     return serialize(result)
 
     async def cov_callback_function(self, peer, key, value):
         message = ProtocolProxyMessage(
@@ -147,14 +147,14 @@ class BACnetProxy(AsyncioProtocolProxy):
         result = await self.bacnet.read_property(address, object_identifier, property_identifier, property_array_index)
         return serialize(result)
 
-    @callback
-    async def read_property_multiple_endpoint(self, _, raw_message: bytes):
-        """Endpoint for reading multiple properties from a BACnet device."""
-        message = json.loads(raw_message.decode('utf8'))
-        address = message['device_address']
-        read_specifications = message['read_specifications']
-        result = await self.bacnet.read_property_multiple(address, read_specifications)
-        return serialize(result)
+    # @callback # TODO: Underlying service is not fully implemented. Commenting endpoint until resolved.
+    # async def read_property_multiple_endpoint(self, _, raw_message: bytes):
+    #     """Endpoint for reading multiple properties from a BACnet device."""
+    #     message = json.loads(raw_message.decode('utf8'))
+    #     address = message['device_address']
+    #     read_specifications = message['read_specifications']
+    #     result = await self.bacnet.read_property_multiple(address, read_specifications)
+    #     return serialize(result)
 
     @callback
     async def time_synchronization_endpoint(self, _, raw_message: bytes):
@@ -179,14 +179,14 @@ class BACnetProxy(AsyncioProtocolProxy):
                                             property_array_index)
         return serialize(result)
 
-    @callback
-    async def write_property_multiple_endpoint(self, _, raw_message: bytes):
-        """Endpoint for writing multiple properties to a BACnet device."""
-        message = json.loads(raw_message.decode('utf8'))
-        address = message['device_address']
-        write_specifications = message['write_specifications']
-        result = await self.bacnet.write_property_multiple(address, write_specifications)
-        return serialize(result)
+    # @callback  # TODO: Underlying service is not fully implemented. Commenting endpoint until resolved.
+    # async def write_property_multiple_endpoint(self, _, raw_message: bytes):
+    #     """Endpoint for writing multiple properties to a BACnet device."""
+    #     message = json.loads(raw_message.decode('utf8'))
+    #     address = message['device_address']
+    #     write_specifications = message['write_specifications']
+    #     result = await self.bacnet.write_property_multiple(address, write_specifications)
+    #     return serialize(result)
 
     @callback
     async def read_device_all_endpoint(self, _, raw_message: bytes):
