@@ -160,7 +160,11 @@ class BACnetProxy(AsyncioProtocolProxy):
         """Endpoint for setting time on a BACnet device."""
         message = json.loads(raw_message.decode('utf8'))
         address = message['address']
-        date_time = datetime.fromisoformat(message['date_time']) if message.get('date_time') else None
+        if date_time_string := message.get('date_time'):
+            try:
+                date_time = datetime.fromisoformat(date_time_string)
+            except ValueError as e:
+                return serialize(e)
         result = await self.bacnet.time_synchronization(address, date_time)
         return serialize(result)
 
