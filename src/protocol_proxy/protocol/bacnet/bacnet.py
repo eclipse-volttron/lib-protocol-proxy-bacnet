@@ -86,7 +86,7 @@ class BACnet:
             # TODO: At the point this is not handled here, the caller should be notified the COV subscription is failed.
             _log.warning(f"COV subscription to {object_identifier} on {device_address} failed: {e}")
         except ExecutionError as e:
-            # Catch other potential bacpypes3 errors
+            # Catch other potential BACpypes3 errors
             _log.warning(f"BACpypes3 execution error: {e}")
         except asyncio.CancelledError:
             # Handle cleanup if the coroutine is cancelled
