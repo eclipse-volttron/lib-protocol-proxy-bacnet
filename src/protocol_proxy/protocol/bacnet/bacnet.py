@@ -1,29 +1,16 @@
 import asyncio
+import csv
 import ipaddress
 import json
 import logging
 import time
-import traceback
-import csv
-
-from math import floor
 
 from collections.abc import Callable
 from datetime import datetime
 from typing import Any
-import time
-import ipaddress
-import csv
-import json
-
-from .bacnet_utils import make_jsonable, _handle_bacnet_response
-from .cache_handler import (_clear_cache_for_device, _get_cached_object_list, _get_cache_stats,
-                            load_cached_object_properties, save_object_properties)
-from .bacnet_broadcast import ExistingAppBroadcastWorkaround
-from bacpypes3.basetypes import DateTime, PropertyReference
 
 from bacpypes3.app import Application, ExecutionError
-from bacpypes3.basetypes import DateTime
+from bacpypes3.basetypes import DateTime, PropertyReference
 from bacpypes3.constructeddata import AnyAtomic
 from bacpypes3.lib.batchread import BatchRead, DeviceAddressObjectPropertyReference
 from bacpypes3.pdu import Address
@@ -31,6 +18,8 @@ from bacpypes3.apdu import (ConfirmedPrivateTransferACK, ConfirmedPrivateTransfe
                             ErrorRejectAbortNack, TimeSynchronizationRequest)
 from bacpypes3.primitivedata import Date, Null, ObjectIdentifier, ObjectType, TagList, Time, PropertyIdentifier
 from bacpypes3.vendor import get_vendor_info
+
+from .cache_handler import _get_cached_object_list, load_cached_object_properties, save_object_properties
 
 _log = logging.getLogger(__name__)
 

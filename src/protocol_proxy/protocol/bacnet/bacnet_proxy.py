@@ -1,30 +1,21 @@
 import asyncio
-import ipaddress
 import json
 import logging
 import sys
-import time
 import traceback
-import csv
 
 from dataclasses import dataclass
 from datetime import datetime
 from functools import partial
 
-from bacpypes3.basetypes import PropertyReference
-from bacpypes3.lib.batchread import BatchRead, DeviceAddressObjectPropertyReference
-from bacpypes3.pdu import Address
-from bacpypes3.apdu import ErrorRejectAbortNack
-from bacpypes3.primitivedata import ObjectIdentifier, TagList
-
 from protocol_proxy.ipc import callback, ProtocolProxyMessage
 from protocol_proxy.proxy import launch
 from protocol_proxy.proxy.asyncio import AsyncioProtocolProxy
 
-from .bacnet_utils import make_jsonable, _handle_bacnet_response
-from .cache_handler import (_clear_cache_for_device, _get_cache_stats)
-
+from . import launch_bacnet
 from .bacnet import BACnet
+from .bacnet_utils import make_jsonable
+from .cache_handler import (_clear_cache_for_device, _get_cache_stats)
 from .json import serialize
 
 _log = logging.getLogger(__name__)
@@ -388,5 +379,4 @@ class BACnetProxy(AsyncioProtocolProxy):
                                       #  Consider named tuple?
 
 if __name__ == '__main__':
-    from . import launch_bacnet
     sys.exit(launch(launch_bacnet))
