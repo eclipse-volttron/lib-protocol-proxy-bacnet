@@ -12,7 +12,6 @@ from protocol_proxy.ipc import callback, ProtocolProxyMessage
 from protocol_proxy.proxy import launch
 from protocol_proxy.proxy.asyncio import AsyncioProtocolProxy
 
-from . import launch_bacnet
 from .bacnet import BACnet
 from .bacnet_utils import make_jsonable
 from .cache_handler import (_clear_cache_for_device, _get_cache_stats)
@@ -379,4 +378,5 @@ class BACnetProxy(AsyncioProtocolProxy):
                                       #  Consider named tuple?
 
 if __name__ == '__main__':
+    from . import launch_bacnet
     sys.exit(launch(launch_bacnet))
