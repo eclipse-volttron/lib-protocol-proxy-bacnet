@@ -157,7 +157,7 @@ class BACnet:
                 int(priority)
             )
         except ErrorRejectAbortNack as e:
-            _log.debug(str(e))
+            return e
 
     # async def write_property_multiple(self, device_address: str, write_specifications: list):
     #     # TODO Implement write_property_multiple.  Commenting until completed.
