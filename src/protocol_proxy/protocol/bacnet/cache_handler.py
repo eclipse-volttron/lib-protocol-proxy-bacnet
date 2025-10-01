@@ -7,9 +7,6 @@ import json
 import logging
 
 _log = logging.getLogger(__name__)
-# Global cache variables
-_object_list_cache = {}
-_cache_timeout = 300    # 5 minutes
 
 
 async def _get_cached_object_list(bacnet_instance, object_list_cache, cache_timeout,
@@ -76,7 +73,7 @@ async def _get_cached_object_list(bacnet_instance, object_list_cache, cache_time
 
 def _clear_cache_for_device(object_list_cache,
                             device_address: str,
-                            device_object_identifier: str = None):
+                            device_object_identifier: str | None = None):
     """Clear cache for a specific device or all devices."""
     if device_object_identifier:
         cache_key = f"{device_address}:{device_object_identifier}"
@@ -201,7 +198,7 @@ def save_object_properties(device_address: str, device_object_identifier: str, o
 def load_cached_object_properties(device_address: str,
                                   device_object_identifier: str,
                                   page: int = 1,
-                                  page_size: int = 100) -> dict:
+                                  page_size: int = 100) -> dict | None:
     """Load cached object properties from CSV file with pagination."""
     try:
         from pathlib import Path

@@ -345,7 +345,7 @@ class BACnetProxy(AsyncioProtocolProxy):
         device_object_identifier = message.get('device_object_identifier', None)
 
         if device_address:
-            _clear_cache_for_device(device_address, device_object_identifier)
+            _clear_cache_for_device(self._object_list_cache, device_address, device_object_identifier)
             result = {"status": "success", "message": f"Cache cleared for device {device_address}"}
         else:
             self._object_list_cache.clear()
