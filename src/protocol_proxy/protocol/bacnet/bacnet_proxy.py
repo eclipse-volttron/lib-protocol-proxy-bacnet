@@ -214,7 +214,6 @@ class BACnetProxy(AsyncioProtocolProxy):
         device_instance_low = message.get('device_instance_low', 0)
         device_instance_high = message.get('device_instance_high', 4194303)
         dest = message.get('dest', '255.255.255.255:47808')
-        apdu_timeout = message.get('apdu_timeout', None)  # Keep for backward compatibility but don't use  # TODO: Why!?
         result = await self.bacnet.who_is(device_instance_low, device_instance_high, dest)
         return serialize(result)
 
