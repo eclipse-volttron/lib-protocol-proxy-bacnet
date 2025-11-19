@@ -262,7 +262,7 @@ class BACnet:
             # Method 1: Standard BACpypes3 who_is (may fail due to broadcast bug)
             _log.debug(f"[scan_subnet] {method_name} (standard) -> {broadcast_addr}")
             try:
-                resp = await asyncio.wait_for(self.who_is(low_id, high_id, broadcast_addr),
+                resp = await asyncio.wait_for(self.who_is(low_id, high_id, None),
                                             timeout=whois_timeout)
                 if resp:
                     _log.debug(f"[scan_subnet] {method_name} (standard) found {len(resp)} devices")

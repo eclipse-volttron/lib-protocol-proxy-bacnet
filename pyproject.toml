@@ -58,6 +58,10 @@ protocol-proxy = ">=2.0.0rc0"
 [tool.poetry.group.dev.dependencies]
 # No additional dependencies.
 
+[tool.poetry.scripts]
+bacnet-scan = "protocol_proxy.protocol.bacnet.tools.scan:main"
+bacnet-grab-config = "protocol_proxy.protocol.bacnet.tools.grab_config:main"
+
 [tool.poetry.group.documentation.dependencies]
 Sphinx = "^4.5.0"
 sphinx-rtd-theme = "^1.0.0"

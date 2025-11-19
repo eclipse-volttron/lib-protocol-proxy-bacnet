@@ -8,7 +8,7 @@ It's a modernized version of the legacy bacnet_scan.py that used BACpypes v2,
 now updated to use BACpypes3 with asyncio.
 
 Usage:
-    bacnet_scan.py [--address ADDR] [--range LOW HIGH] [--timeout SECONDS] [--csv-out FILE]
+    bacnet-scan [--address ADDR] [--range LOW HIGH] [--timeout SECONDS] [--csv-out FILE]
     
     Backward compatible with old BACpypes v2 script:
     - Automatically detects BACpypes.ini in current directory (just like old script)
@@ -24,25 +24,25 @@ Examples:
     # WITH BACpypes.ini in current directory (EXACTLY like old script!):
     
     # Broadcast scan
-    python3 bacnet_scan.py --timeout 5
+    bacnet-scan --timeout 5
     
     # Unicast to specific target
-    python3 bacnet_scan.py --address 192.168.1.248 --timeout 5
+    bacnet-scan --address 192.168.1.248 --timeout 5
     
     # With device instance range filter
-    python3 bacnet_scan.py --range 0 1000
+    bacnet-scan --range 0 1000
     
     # Export results to CSV
-    python3 bacnet_scan.py --csv-out devices.csv --timeout 10
+    bacnet-scan --csv-out devices.csv --timeout 10
     
     
     # WITHOUT BACpypes.ini (must provide local address):
     
     # Broadcast scan
-    python3 bacnet_scan.py --address 192.168.1.173/24 --timeout 5
+    bacnet-scan --address 192.168.1.173/24 --timeout 5
     
     # Unicast to specific target
-    python3 bacnet_scan.py --local 192.168.1.173/24 --address 192.168.1.248
+    bacnet-scan --local 192.168.1.173/24 --address 192.168.1.248
 """
 
 import sys
