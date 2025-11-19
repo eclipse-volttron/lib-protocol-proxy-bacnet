@@ -188,8 +188,26 @@ def write_csv(devices: List[DeviceInfo], filename: str) -> None:
         _log.error(f"Error writing CSV file: {e}")
 
 
-async def main() -> None:
+async def async_main() -> None:
     """Main entry point"""
+    # Set up custom exception handler for "no broadcast" errors in background tasks
+    loop = asyncio.get_running_loop()
+    original_handler = loop.get_exception_handler()
+    
+    def handle_exception(loop, context):
+        exception = context.get("exception")
+        if exception and isinstance(exception, RuntimeError) and "no broadcast" in str(exception):
+            print("\nError: Broadcast not supported on this network interface.")
+            print("Please ensure you have specified a local address with a subnet mask (e.g., --local 192.168.1.5/24)")
+            # Don't call default handler to avoid traceback
+        else:
+            if original_handler:
+                original_handler(loop, context)
+            else:
+                loop.default_exception_handler(context)
+    
+    loop.set_exception_handler(handle_exception)
+
     app = None
     try:
         # Parse arguments - use SimpleArgumentParser which supports INI files
@@ -371,5 +389,9 @@ async def main() -> None:
             app.close()
 
 
+def main() -> None:
+    asyncio.run(async_main())
+
+
 if __name__ == "__main__":
-    asyncio.run(main())
+    main()
