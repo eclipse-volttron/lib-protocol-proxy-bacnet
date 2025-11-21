@@ -5,7 +5,7 @@ import sys
 import traceback
 
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from functools import partial
 
 from protocol_proxy.ipc import callback, ProtocolProxyMessage
@@ -45,6 +45,7 @@ class BACnetProxy(AsyncioProtocolProxy):
         self._object_list_cache = {}
         self._cache_timeout = 300
         self._subscribed_cov: dict[str, COVSubscription] = {}
+        self._time_sync_periodics = {}
 
         self.register_callback(self.batch_read_endpoint, 'BATCH_READ', provides_response=True)
         #self.register_callback(self.confirmed_private_transfer_endpoint, 'CONFIRMED_PRIVATE_TRANSFER', provides_response=True)
@@ -54,6 +55,7 @@ class BACnetProxy(AsyncioProtocolProxy):
         self.register_callback(self.read_property_endpoint, 'READ_PROPERTY', provides_response=True)
         #self.register_callback(self.read_property_multiple_endpoint, 'READ_PROPERTY_MULTIPLE', provides_response=True)
         self.register_callback(self.time_synchronization_endpoint, 'TIME_SYNCHRONIZATION', provides_response=True)
+        self.register_callback(self.setup_time_synchronization_endpoint, 'SETUP_TIME_SYNCHRONIZATION', provides_response=False)
         self.register_callback(self.write_property_endpoint, 'WRITE_PROPERTY', provides_response=True)
         self.register_callback(self.read_device_all_endpoint, 'READ_DEVICE_ALL', provides_response=True)
         self.register_callback(self.who_is_endpoint, 'WHO_IS', provides_response=True)
@@ -160,13 +162,35 @@ class BACnetProxy(AsyncioProtocolProxy):
         """Endpoint for setting time on a BACnet device."""
         message = json.loads(raw_message.decode('utf8'))
         address = message['address']
-        if date_time_string := message.get('date_time'):
-            try:
-                date_time = datetime.fromisoformat(date_time_string)
-            except ValueError as e:
-                return serialize(e)
-        result = await self.bacnet.time_synchronization(address, date_time)
-        return serialize(result)
+        date_time_string = message['date_time']
+        try:
+            date_time = datetime.fromisoformat(date_time_string)
+            result = await self.bacnet.time_synchronization(address, date_time)
+            return serialize(result)
+        except ValueError as e:
+            return serialize(e)
+
+    @callback
+    async def setup_time_synchronization_endpoint(self, _, raw_message: bytes):
+        """Endpoint for setting time on a BACnet device."""
+        message = json.loads(raw_message.decode('utf8'))
+        address = message['address']
+        interval_string = message.get('interval')
+        if interval_string is None:
+            task = self._time_sync_periodics.pop(address, None)
+            task.cancel()
+        else:
+            interval_seconds = timedelta(seconds=float(interval_string))
+            async def synchronize_time():
+                try:
+                    _log.info(f'Starting time synchronization periodic for: {address}')
+                    while True:
+                        date_time = datetime.now(tz=timezone.utc)
+                        await self.bacnet.time_synchronization(device_address=address, date_time=date_time)
+                        await asyncio.sleep(interval_seconds.total_seconds())
+                except asyncio.CancelledError:
+                    _log.info(f'Stopping time synchronization periodic for {address}')
+            self._time_sync_periodics[address] = self.loop.create_task(synchronize_time())
 
     @callback
     async def write_property_endpoint(self, _, raw_message: bytes):
