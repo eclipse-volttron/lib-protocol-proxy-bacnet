@@ -55,19 +55,22 @@ class BACnet:
                                         property_identifier=property_name)
 
     async def batch_read(self, device_address: str, read_specifications: dict[str, dict]):
-        daopr_list = [
-            DeviceAddressObjectPropertyReference(
-                key=key,
-                device_address=device_address,
-                object_identifier=spec['object_id'],
-                property_reference=(spec['property'], spec['array_index'])
-                    if spec['array_index'] is not None else spec['property']
-            ) for key, spec in read_specifications.items()
-        ]
         results = {}
-        batch = BatchRead(daopr_list)
-        # run until the batch is done
-        await batch.run(self.app, lambda k, v: results.update({k: v}))
+        try:
+            daopr_list = [
+                DeviceAddressObjectPropertyReference(
+                    key=key,
+                    device_address=device_address,
+                    object_identifier=spec['object_id'],
+                    property_reference=(spec['property'], spec['array_index'])
+                        if spec['array_index'] is not None else spec['property']
+                ) for key, spec in read_specifications.items()
+            ]
+            batch = BatchRead(daopr_list)
+            # run until the batch is done
+            await batch.run(self.app, lambda k, v: results.update({k: v}))
+        except BaseException as e:
+            _log.warning(f'Exception in BatchRead: {e}')
         return results
 
     async def change_of_value(self, device_address: str, object_identifier: str, process_identifier: int | None,
