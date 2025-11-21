@@ -33,11 +33,11 @@ class COVSubscription:
                 and confirmed == confirmed and lifetime == lifetime)
 
 class BACnetProxy(AsyncioProtocolProxy):
-    def __init__(self, local_device_address, bacnet_network=0, vendor_id=999, object_name='VOLTTRON BACnet Proxy',
+    def __init__(self, local_interface, bacnet_network=0, vendor_id=999, object_name='VOLTTRON BACnet Proxy',
                  **kwargs):
-        _log.debug('IN BACNETPROXY __init__')
+        _log.debug('IN BACNET PROXY __init__')
         super(BACnetProxy, self).__init__(**kwargs)
-        self.bacnet = BACnet(local_device_address, bacnet_network, vendor_id, object_name, **kwargs)
+        self.bacnet = BACnet(local_interface, bacnet_network, vendor_id, object_name, **kwargs)
         self.loop = asyncio.get_event_loop()
         
         # Cache for object-list to avoid re-reading on every page request
@@ -353,7 +353,7 @@ class BACnetProxy(AsyncioProtocolProxy):
         return json.dumps(result).encode('utf8')
 
     @callback
-    async def get_cache_stats_endpoint(self, _, raw_message: bytes):
+    async def get_cache_stats_endpoint(self, _, __):
         """Endpoint for getting cache statistics."""
         result = _get_cache_stats(self._object_list_cache, self._cache_timeout)
         return json.dumps(result).encode('utf8')

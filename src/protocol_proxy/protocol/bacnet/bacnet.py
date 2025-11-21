@@ -25,16 +25,16 @@ _log = logging.getLogger(__name__)
 
 
 class BACnet:
-    def __init__(self, local_device_address, bacnet_network=0, vendor_id=999, object_name='VOLTTRON BACnet Proxy',
+    def __init__(self, local_interface, bacnet_port=0, vendor_id=999, object_name='VOLTTRON BACnet Proxy',
                  device_info_cache=None, router_info_cache=None, ase_id=None, **_):
         _log.debug('WELCOME BAC')
         vendor_info = get_vendor_info(vendor_id)
         device_object_class = vendor_info.get_object_class(ObjectType.device)
         device_object = device_object_class(objectIdentifier=('device', vendor_id), objectName=object_name)
         network_port_object_class = vendor_info.get_object_class(ObjectType.networkPort)
-        network_port_object = network_port_object_class(local_device_address,
-                                                        objectIdentifier=("network-port", bacnet_network),
-                                                        objectName="NetworkPort-1", networkNumber=bacnet_network,
+        network_port_object = network_port_object_class(local_interface,
+                                                        objectIdentifier=("network-port", bacnet_port),
+                                                        objectName="NetworkPort-1", networkNumber=bacnet_port,
                                                         networkNumberQuality="configured")
         self.app = Application.from_object_list(
             [device_object, network_port_object],
@@ -500,9 +500,7 @@ class BACnet:
         )
 
         try:
-            # Perform WHO-IS discovery (note: bacpypes3 who_is doesn't accept apdu_timeout parameter)
-            i_am_responses = await self.app.who_is(device_instance_low, device_instance_high,
-                                                   destination_addr)
+            i_am_responses = await self.app.who_is(device_instance_low, device_instance_high, destination_addr)
             _log.debug(f"Received {len(i_am_responses)} I-Am response(s) from {destination_addr}")
 
             devices_found = []
