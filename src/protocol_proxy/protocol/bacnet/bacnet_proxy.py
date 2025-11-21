@@ -33,11 +33,11 @@ class COVSubscription:
                 and confirmed == confirmed and lifetime == lifetime)
 
 class BACnetProxy(AsyncioProtocolProxy):
-    def __init__(self, local_interface, bacnet_network=0, vendor_id=999, object_name='VOLTTRON BACnet Proxy',
+    def __init__(self, local_interface, bacnet_port=0, vendor_id=999, object_name='VOLTTRON BACnet Proxy',
                  **kwargs):
         _log.debug('IN BACNET PROXY __init__')
         super(BACnetProxy, self).__init__(**kwargs)
-        self.bacnet = BACnet(local_interface, bacnet_network, vendor_id, object_name, **kwargs)
+        self.bacnet = BACnet(local_interface, bacnet_port, vendor_id, object_name, **kwargs)
         self.loop = asyncio.get_event_loop()
         
         # Cache for object-list to avoid re-reading on every page request
