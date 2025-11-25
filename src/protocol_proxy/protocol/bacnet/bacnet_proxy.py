@@ -189,6 +189,7 @@ class BACnetProxy(AsyncioProtocolProxy):
                     _log.info(f'Starting time synchronization periodic for: {address}')
                     while True:
                         date_time = datetime.now(timezone.utc).astimezone(time_zone)
+                        _log.info(f'Synchronizing time on {address} to: {date_time}')
                         await self.bacnet.time_synchronization(device_address=address, date_time=date_time)
                         await asyncio.sleep(interval_seconds.total_seconds())
                 except asyncio.CancelledError:
