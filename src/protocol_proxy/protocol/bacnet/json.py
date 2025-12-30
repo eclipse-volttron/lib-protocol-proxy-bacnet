@@ -6,7 +6,7 @@ import re
 from enum import Enum
 
 from bacpypes3.apdu import ErrorRejectAbortNack, AbortPDU, ErrorPDU, RejectPDU
-from bacpypes3.basetypes import EngineeringUnits
+from bacpypes3.basetypes import EngineeringUnits, BinaryPV
 from bacpypes3.constructeddata import Sequence
 from bacpypes3.primitivedata import Atomic
 from bacpypes3.json.util import atomic_encode, sequence_to_json
@@ -68,6 +68,10 @@ def _serialize(val):
         ret_val = str(val)
     elif isinstance(val, (ipaddress.IPv4Address, ipaddress.IPv6Address)):
         ret_val = str(val)
+    # TODO: Casting binaries to int for backwards compatability. What is the best way to deal with this permanently?
+    # Report binary input/output/value as integer.
+    elif isinstance(val, BinaryPV):
+        ret_val = int(val)
     # Handle BACPypes Atomic and Sequence types:
     elif isinstance(val, Atomic):
         ret_val = atomic_encode(val)
