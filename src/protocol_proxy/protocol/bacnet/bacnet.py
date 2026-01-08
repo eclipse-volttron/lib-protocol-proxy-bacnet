@@ -27,7 +27,7 @@ _log = logging.getLogger(__name__)
 class BACnet:
     def __init__(self, local_interface, bacnet_port=0, vendor_id=999, object_name='VOLTTRON BACnet Proxy',
                  device_info_cache=None, router_info_cache=None, ase_id=None, **_):
-        _log.debug('WELCOME BAC')
+        #_log.debug('WELCOME BAC')
         vendor_info = get_vendor_info(vendor_id)
         device_object_class = vendor_info.get_object_class(ObjectType.device)
         device_object = device_object_class(objectIdentifier=('device', vendor_id), objectName=object_name)
@@ -42,7 +42,7 @@ class BACnet:
             router_info_cache=router_info_cache,
             aseID=ase_id
         )
-        _log.debug(f'WE HAVE AN APP: {self.app.device_info_cache}')
+        #_log.debug(f'WE HAVE AN APP: {self.app.device_info_cache}')
 
     async def query_device(self, address: str, property_name: str = 'object-identifier'):
         """Returns properties about the device at the given address.
@@ -50,7 +50,7 @@ class BACnet:
             This function allows unicast discovery.
             This can get everything from device if it is using read_property_multiple and ALL
         """
-        _log.debug('IN QUERY DEVICE METHOD')
+        #_log.debug('IN QUERY DEVICE METHOD')
         return await self.read_property(device_address=address, object_identifier='device:4194303',
                                         property_identifier=property_name)
 
@@ -113,13 +113,13 @@ class BACnet:
                 property_identifier,
                 int(property_array_index) if property_array_index is not None else None
             )
-            _log.debug(f"BACnet.read_property response: {response}")
+            #_log.debug(f"BACnet.read_property response: {response}")
         except ErrorRejectAbortNack as err:
             _log.debug(f'Error reading property {err}')
             response = err
         if isinstance(response, AnyAtomic):
             response = response.get_value()
-        _log.debug(f"BACnet.read_property final response: {response}")
+        #_log.debug(f"BACnet.read_property final response: {response}")
         return response
 
     # async def read_property_multiple(self, device_address: str, read_specifications: dict):
@@ -504,7 +504,7 @@ class BACnet:
 
         try:
             i_am_responses = await self.app.who_is(device_instance_low, device_instance_high, destination_addr)
-            _log.debug(f"Received {len(i_am_responses)} I-Am response(s) from {destination_addr}")
+            _log.info(f"Received {len(i_am_responses)} I-Am response(s) from {destination_addr}")
 
             devices_found = []
             if i_am_responses:

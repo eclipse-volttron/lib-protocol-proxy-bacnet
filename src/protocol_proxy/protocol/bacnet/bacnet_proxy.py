@@ -36,7 +36,7 @@ class COVSubscription:
 class BACnetProxy(AsyncioProtocolProxy):
     def __init__(self, local_interface, bacnet_port=0, vendor_id=999, object_name='VOLTTRON BACnet Proxy',
                  **kwargs):
-        _log.debug('IN BACNET PROXY __init__')
+        #_log.debug('IN BACNET PROXY __init__')
         super(BACnetProxy, self).__init__(**kwargs)
         self.bacnet = BACnet(local_interface, bacnet_port, vendor_id, object_name, **kwargs)
         self.loop = asyncio.get_event_loop()
@@ -93,7 +93,7 @@ class BACnetProxy(AsyncioProtocolProxy):
             method_name='RECEIVE_COV',
             payload=serialize({key: value})
             )
-        _log.debug(f'@@@@@@ SENDING COV CALLBACK: {message}')
+        #_log.debug(f'@@@@@@ SENDING COV CALLBACK: {message}')
         await self.send(peer, message)
 
     @callback
