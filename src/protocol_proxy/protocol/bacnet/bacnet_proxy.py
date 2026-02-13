@@ -5,8 +5,9 @@ import sys
 import traceback
 
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from functools import partial
+from zoneinfo import ZoneInfo
 
 from protocol_proxy.ipc import callback, ProtocolProxyMessage
 from protocol_proxy.proxy import launch
@@ -33,11 +34,11 @@ class COVSubscription:
                 and confirmed == confirmed and lifetime == lifetime)
 
 class BACnetProxy(AsyncioProtocolProxy):
-    def __init__(self, local_device_address, bacnet_network=0, vendor_id=999, object_name='VOLTTRON BACnet Proxy',
+    def __init__(self, local_interface, bacnet_port=0, vendor_id=999, object_name='VOLTTRON BACnet Proxy',
                  **kwargs):
-        _log.debug('IN BACNETPROXY __init__')
+        #_log.debug('IN BACNET PROXY __init__')
         super(BACnetProxy, self).__init__(**kwargs)
-        self.bacnet = BACnet(local_device_address, bacnet_network, vendor_id, object_name, **kwargs)
+        self.bacnet = BACnet(local_interface, bacnet_port, vendor_id, object_name, **kwargs)
         self.loop = asyncio.get_event_loop()
         
         # Cache for object-list to avoid re-reading on every page request
@@ -45,6 +46,7 @@ class BACnetProxy(AsyncioProtocolProxy):
         self._object_list_cache = {}
         self._cache_timeout = 300
         self._subscribed_cov: dict[str, COVSubscription] = {}
+        self._time_sync_periodics = {}
 
         self.register_callback(self.batch_read_endpoint, 'BATCH_READ', provides_response=True)
         #self.register_callback(self.confirmed_private_transfer_endpoint, 'CONFIRMED_PRIVATE_TRANSFER', provides_response=True)
@@ -54,6 +56,7 @@ class BACnetProxy(AsyncioProtocolProxy):
         self.register_callback(self.read_property_endpoint, 'READ_PROPERTY', provides_response=True)
         #self.register_callback(self.read_property_multiple_endpoint, 'READ_PROPERTY_MULTIPLE', provides_response=True)
         self.register_callback(self.time_synchronization_endpoint, 'TIME_SYNCHRONIZATION', provides_response=True)
+        self.register_callback(self.setup_time_synchronization_endpoint, 'SETUP_TIME_SYNCHRONIZATION', provides_response=False)
         self.register_callback(self.write_property_endpoint, 'WRITE_PROPERTY', provides_response=True)
         self.register_callback(self.read_device_all_endpoint, 'READ_DEVICE_ALL', provides_response=True)
         self.register_callback(self.who_is_endpoint, 'WHO_IS', provides_response=True)
@@ -90,7 +93,7 @@ class BACnetProxy(AsyncioProtocolProxy):
             method_name='RECEIVE_COV',
             payload=serialize({key: value})
             )
-        _log.debug(f'@@@@@@ SENDING COV CALLBACK: {message}')
+        #_log.debug(f'@@@@@@ SENDING COV CALLBACK: {message}')
         await self.send(peer, message)
 
     @callback
@@ -159,14 +162,39 @@ class BACnetProxy(AsyncioProtocolProxy):
     async def time_synchronization_endpoint(self, _, raw_message: bytes):
         """Endpoint for setting time on a BACnet device."""
         message = json.loads(raw_message.decode('utf8'))
-        address = message['address']
-        if date_time_string := message.get('date_time'):
-            try:
-                date_time = datetime.fromisoformat(date_time_string)
-            except ValueError as e:
-                return serialize(e)
-        result = await self.bacnet.time_synchronization(address, date_time)
-        return serialize(result)
+        address = message['device_address']
+        date_time_string = message['date_time']
+        try:
+            date_time = datetime.fromisoformat(date_time_string)
+            result = await self.bacnet.time_synchronization(address, date_time)
+            return serialize(result)
+        except ValueError as e:
+            return serialize(e)
+
+    @callback
+    async def setup_time_synchronization_endpoint(self, _, raw_message: bytes):
+        """Endpoint for setting time on a BACnet device."""
+        message = json.loads(raw_message.decode('utf8'))
+        address = message['device_address']
+        interval_string = message.get('interval')
+        time_zone_string = message.get('time_zone')
+        if interval_string is None:
+            task = self._time_sync_periodics.pop(address, None)
+            task.cancel()
+        else:
+            interval_seconds = timedelta(seconds=float(interval_string))
+            time_zone = ZoneInfo(time_zone_string)
+            async def synchronize_time():
+                try:
+                    _log.info(f'Starting time synchronization periodic for: {address}')
+                    while True:
+                        date_time = datetime.now(timezone.utc).astimezone(time_zone)
+                        _log.info(f'Synchronizing time on {address} to: {date_time}')
+                        await self.bacnet.time_synchronization(device_address=address, date_time=date_time)
+                        await asyncio.sleep(interval_seconds.total_seconds())
+                except asyncio.CancelledError:
+                    _log.info(f'Stopping time synchronization periodic for {address}')
+            self._time_sync_periodics[address] = self.loop.create_task(synchronize_time())
 
     @callback
     async def write_property_endpoint(self, _, raw_message: bytes):
@@ -214,7 +242,6 @@ class BACnetProxy(AsyncioProtocolProxy):
         device_instance_low = message.get('device_instance_low', 0)
         device_instance_high = message.get('device_instance_high', 4194303)
         dest = message.get('dest', '255.255.255.255:47808')
-        apdu_timeout = message.get('apdu_timeout', None)  # Keep for backward compatibility but don't use  # TODO: Why!?
         result = await self.bacnet.who_is(device_instance_low, device_instance_high, dest)
         return serialize(result)
 
@@ -354,7 +381,7 @@ class BACnetProxy(AsyncioProtocolProxy):
         return json.dumps(result).encode('utf8')
 
     @callback
-    async def get_cache_stats_endpoint(self, _, raw_message: bytes):
+    async def get_cache_stats_endpoint(self, _, __):
         """Endpoint for getting cache statistics."""
         result = _get_cache_stats(self._object_list_cache, self._cache_timeout)
         return json.dumps(result).encode('utf8')
