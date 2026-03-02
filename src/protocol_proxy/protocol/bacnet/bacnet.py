@@ -190,15 +190,19 @@ class BACnet:
                                                       serviceNumber=service_number)
         if service_parameters:
             cpt_request.serviceParameters = service_parameters
-        response = await self.app.request(cpt_request)
-        if isinstance(response, ConfirmedPrivateTransferError):
-            _log.warning(f'Error calling Confirmed Private Transfer Service: {response}')
-            return None
-        elif isinstance(response, ConfirmedPrivateTransferACK):
-            return response
+        try:
+            response = await self.app.request(cpt_request)
+        except Exception as e:
+            _log.warning(f'Exception sending Confirmed Private Transfer Request: {e}')
         else:
-            _log.warning(f'Some other Error: {response}')  # TODO: Improve error handling.
-            return None
+            if isinstance(response, ConfirmedPrivateTransferError):
+                _log.warning(f'Error calling Confirmed Private Transfer Service: {response}')
+                return None
+            elif isinstance(response, ConfirmedPrivateTransferACK):
+                return response
+            else:
+                _log.warning(f'Some other Error: {response}')  # TODO: Improve error handling.
+                return None
 
     async def scan_subnet(self,
                         network_str: str,
