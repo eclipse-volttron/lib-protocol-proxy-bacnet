@@ -36,13 +36,17 @@ class BACnet:
                                                         objectIdentifier=("network-port", bacnet_port),
                                                         objectName="NetworkPort-1", networkNumber=bacnet_port,
                                                         networkNumberQuality="configured")
+        # TODO: In order to implement better error handling, it may be necessary to sublcass Application.
+        #       BACPypes3 raises an AssertionError, for instance in the Application.confirmation which does not
+        #       seem to be possible to catch without overriding the method.
+        #   It should be possilble to make this class a subclass of Application,
+        #       instead of having Application as an attribute.
         self.app = Application.from_object_list(
             [device_object, network_port_object],
             device_info_cache=device_info_cache,  # TODO: If these should be passed in, add to args & launch.
             router_info_cache=router_info_cache,
             aseID=ase_id
         )
-        #_log.debug(f'WE HAVE AN APP: {self.app.device_info_cache}')
 
     async def query_device(self, address: str, property_name: str = 'object-identifier'):
         """Returns properties about the device at the given address.
