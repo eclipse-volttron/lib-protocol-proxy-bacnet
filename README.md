@@ -20,10 +20,10 @@ Communication with a BACnet device on a network happens via a virtual BACnet dev
 [//]: # (of the documentation for this component is located in the "docs" directory of this repository.)
 
 # Installation
-This library, along with its dependencies, can be installed using pip:
+This library, along with its dependencies, can be installed using pip. Note that while the project is in Release Candidate phase, you must use the `--pre` flag:
 
 ```shell
-pip install lib-protocol-proxy-bacnet
+pip install protocol-proxy-bacnet --pre
 ```
 
 # Development
