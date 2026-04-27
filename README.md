@@ -23,7 +23,7 @@ Communication with a BACnet device on a network happens via a virtual BACnet dev
 This library, along with its dependencies, can be installed using pip:
 
 ```shell
-pip install protocol-proxy-bacnet
+pip install lib-protocol-proxy-bacnet
 ```
 
 # Development
