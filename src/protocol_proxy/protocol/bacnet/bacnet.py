@@ -25,24 +25,28 @@ _log = logging.getLogger(__name__)
 
 
 class BACnet:
-    def __init__(self, local_device_address, bacnet_network=0, vendor_id=999, object_name='VOLTTRON BACnet Proxy',
+    def __init__(self, local_interface, bacnet_port=0, vendor_id=999, object_name='VOLTTRON BACnet Proxy',
                  device_info_cache=None, router_info_cache=None, ase_id=None, **_):
-        _log.debug('WELCOME BAC')
+        #_log.debug('WELCOME BAC')
         vendor_info = get_vendor_info(vendor_id)
         device_object_class = vendor_info.get_object_class(ObjectType.device)
         device_object = device_object_class(objectIdentifier=('device', vendor_id), objectName=object_name)
         network_port_object_class = vendor_info.get_object_class(ObjectType.networkPort)
-        network_port_object = network_port_object_class(local_device_address,
-                                                        objectIdentifier=("network-port", bacnet_network),
-                                                        objectName="NetworkPort-1", networkNumber=bacnet_network,
+        network_port_object = network_port_object_class(local_interface,
+                                                        objectIdentifier=("network-port", bacnet_port),
+                                                        objectName="NetworkPort-1", networkNumber=bacnet_port,
                                                         networkNumberQuality="configured")
+        # TODO: In order to implement better error handling, it may be necessary to sublcass Application.
+        #       BACPypes3 raises an AssertionError, for instance in the Application.confirmation which does not
+        #       seem to be possible to catch without overriding the method.
+        #   It should be possilble to make this class a subclass of Application,
+        #       instead of having Application as an attribute.
         self.app = Application.from_object_list(
             [device_object, network_port_object],
             device_info_cache=device_info_cache,  # TODO: If these should be passed in, add to args & launch.
             router_info_cache=router_info_cache,
             aseID=ase_id
         )
-        _log.debug(f'WE HAVE AN APP: {self.app.device_info_cache}')
 
     async def query_device(self, address: str, property_name: str = 'object-identifier'):
         """Returns properties about the device at the given address.
@@ -50,24 +54,27 @@ class BACnet:
             This function allows unicast discovery.
             This can get everything from device if it is using read_property_multiple and ALL
         """
-        _log.debug('IN QUERY DEVICE METHOD')
+        #_log.debug('IN QUERY DEVICE METHOD')
         return await self.read_property(device_address=address, object_identifier='device:4194303',
                                         property_identifier=property_name)
 
     async def batch_read(self, device_address: str, read_specifications: dict[str, dict]):
-        daopr_list = [
-            DeviceAddressObjectPropertyReference(
-                key=key,
-                device_address=device_address,
-                object_identifier=spec['object_id'],
-                property_reference=(spec['property'], spec['array_index'])
-                    if spec['array_index'] is not None else spec['property']
-            ) for key, spec in read_specifications.items()
-        ]
         results = {}
-        batch = BatchRead(daopr_list)
-        # run until the batch is done
-        await batch.run(self.app, lambda k, v: results.update({k: v}))
+        try:
+            daopr_list = [
+                DeviceAddressObjectPropertyReference(
+                    key=key,
+                    device_address=device_address,
+                    object_identifier=spec['object_id'],
+                    property_reference=(spec['property'], spec['array_index'])
+                        if spec['array_index'] is not None else spec['property']
+                ) for key, spec in read_specifications.items()
+            ]
+            batch = BatchRead(daopr_list)
+            # run until the batch is done
+            await batch.run(self.app, lambda k, v: results.update({k: v}))
+        except BaseException as e:
+            _log.warning(f'Exception in BatchRead: {e}')
         return results
 
     async def change_of_value(self, device_address: str, object_identifier: str, process_identifier: int | None,
@@ -110,13 +117,13 @@ class BACnet:
                 property_identifier,
                 int(property_array_index) if property_array_index is not None else None
             )
-            _log.debug(f"BACnet.read_property response: {response}")
+            #_log.debug(f"BACnet.read_property response: {response}")
         except ErrorRejectAbortNack as err:
             _log.debug(f'Error reading property {err}')
             response = err
         if isinstance(response, AnyAtomic):
             response = response.get_value()
-        _log.debug(f"BACnet.read_property final response: {response}")
+        #_log.debug(f"BACnet.read_property final response: {response}")
         return response
 
     # async def read_property_multiple(self, device_address: str, read_specifications: dict):
@@ -183,15 +190,19 @@ class BACnet:
                                                       serviceNumber=service_number)
         if service_parameters:
             cpt_request.serviceParameters = service_parameters
-        response = await self.app.request(cpt_request)
-        if isinstance(response, ConfirmedPrivateTransferError):
-            _log.warning(f'Error calling Confirmed Private Transfer Service: {response}')
-            return None
-        elif isinstance(response, ConfirmedPrivateTransferACK):
-            return response
+        try:
+            response = await self.app.request(cpt_request)
+        except Exception as e:
+            _log.warning(f'Exception sending Confirmed Private Transfer Request: {e}')
         else:
-            _log.warning(f'Some other Error: {response}')  # TODO: Improve error handling.
-            return None
+            if isinstance(response, ConfirmedPrivateTransferError):
+                _log.warning(f'Error calling Confirmed Private Transfer Service: {response}')
+                return None
+            elif isinstance(response, ConfirmedPrivateTransferACK):
+                return response
+            else:
+                _log.warning(f'Some other Error: {response}')  # TODO: Improve error handling.
+                return None
 
     async def scan_subnet(self,
                         network_str: str,
@@ -500,10 +511,8 @@ class BACnet:
         )
 
         try:
-            # Perform WHO-IS discovery (note: bacpypes3 who_is doesn't accept apdu_timeout parameter)
-            i_am_responses = await self.app.who_is(device_instance_low, device_instance_high,
-                                                   destination_addr)
-            _log.debug(f"Received {len(i_am_responses)} I-Am response(s) from {destination_addr}")
+            i_am_responses = await self.app.who_is(device_instance_low, device_instance_high, destination_addr)
+            _log.info(f"Received {len(i_am_responses)} I-Am response(s) from {destination_addr}")
 
             devices_found = []
             if i_am_responses:
