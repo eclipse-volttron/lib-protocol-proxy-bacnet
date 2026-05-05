@@ -183,8 +183,6 @@ class BACnet:
 
     async def confirmed_private_transfer(self, address: Address, vendor_id: int, service_number: int,
                                          service_parameters: TagList = None) -> Any:
-        # TODO: Probably need one or more try blocks.
-        # TODO: service_parameters probably needs to already be formatted, but how?
         cpt_request = ConfirmedPrivateTransferRequest(destination=address,
                                                       vendorID=vendor_id,
                                                       serviceNumber=service_number)
