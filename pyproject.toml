@@ -57,7 +57,7 @@ protocol-proxy = ">=2.0.0rc2"
 psutil = ">=5.9.0,<8.0.0"
 
 [tool.poetry.group.dev.dependencies]
-# No additional dependencies.
+pytest = ">=8.0,<10.0"
 
 [tool.poetry.scripts]
 bacnet-scan = "protocol_proxy.protocol.bacnet.tools.scan:main"
