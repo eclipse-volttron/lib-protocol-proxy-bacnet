@@ -183,8 +183,6 @@ class BACnet:
 
     async def confirmed_private_transfer(self, address: Address, vendor_id: int, service_number: int,
                                          service_parameters: TagList = None) -> Any:
-        # TODO: Probably need one or more try blocks.
-        # TODO: service_parameters probably needs to already be formatted, but how?
         cpt_request = ConfirmedPrivateTransferRequest(destination=address,
                                                       vendorID=vendor_id,
                                                       serviceNumber=service_number)
@@ -273,7 +271,7 @@ class BACnet:
             # Method 1: Standard BACpypes3 who_is (may fail due to broadcast bug)
             _log.debug(f"[scan_subnet] {method_name} (standard) -> {broadcast_addr}")
             try:
-                resp = await asyncio.wait_for(self.who_is(low_id, high_id, broadcast_addr),
+                resp = await asyncio.wait_for(self.who_is(low_id, high_id, None),
                                             timeout=whois_timeout)
                 if resp:
                     _log.debug(f"[scan_subnet] {method_name} (standard) found {len(resp)} devices")

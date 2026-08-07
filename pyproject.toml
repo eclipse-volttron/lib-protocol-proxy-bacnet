@@ -6,7 +6,7 @@ build-backend = "poetry.core.masonry.api"
 profile = "black"
 
 [tool.mypy]
-python_version = 3.10
+python_version = ">=3.10,<4.0"
 show_error_context = true
 pretty = true
 show_column_numbers = true
@@ -54,9 +54,14 @@ classifiers = [
 python = ">=3.10,<4.0"
 bacpypes3 = ">=0.0.102"
 protocol-proxy = ">=2.0.0rc2"
+psutil = ">=5.9.0,<8.0.0"
 
 [tool.poetry.group.dev.dependencies]
-# No additional dependencies.
+pytest = ">=8.0,<10.0"
+
+[tool.poetry.scripts]
+bacnet-scan = "protocol_proxy.protocol.bacnet.tools.scan:main"
+bacnet-grab-config = "protocol_proxy.protocol.bacnet.tools.grab_config:main"
 
 [tool.poetry.group.documentation.dependencies]
 Sphinx = "^4.5.0"
