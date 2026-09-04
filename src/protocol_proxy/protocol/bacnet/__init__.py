@@ -3,6 +3,7 @@ import logging
 from argparse import ArgumentParser
 from typing import Callable
 
+from .bacnet import BACnet
 from .bacnet_proxy import BACnetProxy
 
 PROXY_CLASS = BACnetProxy
@@ -13,6 +14,11 @@ async def run_proxy(local_interface, **kwargs):
     _log.info(f'Launching BACnet Proxy at interface {local_interface} using parameters: {kwargs}.')
     bp = BACnetProxy(local_interface, **kwargs)
     await bp.start()
+
+async def run_bacnet_device(local_interface, **kwargs):
+    print(f'Launching BACnet Device at interface {local_interface} using parameters: {kwargs}.')
+    return BACnet(local_interface, **kwargs)
+
 
 def launch_bacnet(parser: ArgumentParser) -> tuple[ArgumentParser, Callable]:
     parser.add_argument('--local-interface', type=str, required=True,
