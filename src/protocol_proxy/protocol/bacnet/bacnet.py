@@ -35,7 +35,8 @@ class BACnet:
         network_port_object = network_port_object_class(local_interface,
                                                         objectIdentifier=("network-port", bacnet_port),
                                                         objectName="NetworkPort-1", networkNumber=bacnet_port,
-                                                        networkNumberQuality="configured")
+                                                        networkNumberQuality="configured",
+                                                        bacnetIPUDPPort=bacnet_port)
         # TODO: In order to implement better error handling, it may be necessary to sublcass Application.
         #       BACPypes3 raises an AssertionError, for instance in the Application.confirmation which does not
         #       seem to be possible to catch without overriding the method.
