@@ -23,8 +23,11 @@ Communication with a BACnet device on a network happens via a virtual BACnet dev
 This library, along with its dependencies, can be installed using pip:
 
 ```shell
-pip install lib-protocol-proxy-bacnet
+pip install protocol-proxy-bacnet
 ```
+
+Note that this is rarely necessary as this library will typically be used as a dependency of an application acting as a
+Protocol Proxy Manager, and will be installed as a dependency of that application.
 
 # Development
 This library is maintained by the VOLTTRON Development Team.
