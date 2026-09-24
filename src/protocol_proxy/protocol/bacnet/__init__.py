@@ -1,32 +1,44 @@
-import logging
+"""BACnet plugin for protocol_proxy.
 
-from argparse import ArgumentParser
-from typing import Callable
+The proxy class is imported lazily so that running ``python -m protocol_proxy.protocol.bacnet.bacnet_proxy``
+executes that module exactly once. When it is the running ``__main__`` module, attribute lookups resolve to it,
+so ``protocol_proxy.protocol.bacnet.BACnetProxy`` is the very class the running proxy was built from (which
+proxy plugins rely on for their ``isinstance`` checks).
+"""
+import logging
+import sys
+
+from typing import TYPE_CHECKING
 
 from .bacnet import BACnet
-from .bacnet_proxy import BACnetProxy
 
-PROXY_CLASS = BACnetProxy
+if TYPE_CHECKING:
+    from .bacnet_proxy import BACnetProxy, launch_bacnet, run_proxy
+
+__all__ = ['BACnet', 'BACnetProxy', 'PROXY_CLASS', 'launch_bacnet', 'run_bacnet_device', 'run_proxy']
 
 _log = logging.getLogger(__name__)
 
-async def run_proxy(local_interface, **kwargs):
-    _log.info(f'Launching BACnet Proxy at interface {local_interface} using parameters: {kwargs}.')
-    bp = BACnetProxy(local_interface, **kwargs)
-    await bp.start()
+_PROXY_MODULE_NAME = f'{__name__}.bacnet_proxy'
+_LAZY_ATTRIBUTES = {'BACnetProxy': 'BACnetProxy', 'PROXY_CLASS': 'BACnetProxy',
+                    'launch_bacnet': 'launch_bacnet', 'run_proxy': 'run_proxy'}
+
+
+def _proxy_module():
+    """Return the bacnet_proxy module, reusing ``__main__`` when that is the module being run with ``python -m``."""
+    main = sys.modules.get('__main__')
+    if getattr(getattr(main, '__spec__', None), 'name', None) == _PROXY_MODULE_NAME:
+        return main
+    from . import bacnet_proxy
+    return bacnet_proxy
+
+
+def __getattr__(name: str):
+    if name in _LAZY_ATTRIBUTES:
+        return getattr(_proxy_module(), _LAZY_ATTRIBUTES[name])
+    raise AttributeError(f'module {__name__!r} has no attribute {name!r}')
+
 
 async def run_bacnet_device(local_interface, **kwargs):
-    print(f'Launching BACnet Device at interface {local_interface} using parameters: {kwargs}.')
+    _log.info(f'Launching BACnet Device at interface {local_interface} using parameters: {kwargs}.')
     return BACnet(local_interface, **kwargs)
-
-
-def launch_bacnet(parser: ArgumentParser) -> tuple[ArgumentParser, Callable]:
-    parser.add_argument('--local-interface', type=str, required=True,
-                        help='Address on the local machine of this BACnet Proxy.')
-    parser.add_argument('--bacnet-port', type=int, default=0,
-                        help='The BACnet port as an offset from 47808.')
-    parser.add_argument('--vendor-id', type=int, default=999,
-                        help='The BACnet vendor ID to use for the local device of this BACnet Proxy.')
-    parser.add_argument('--object-name', type=str, default='VOLTTRON BACnet Proxy',
-                        help='The name of the local device for this BACnet Proxy.')
-    return parser, run_proxy

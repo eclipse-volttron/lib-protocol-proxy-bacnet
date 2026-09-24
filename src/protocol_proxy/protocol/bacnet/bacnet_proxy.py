@@ -4,14 +4,16 @@ import logging
 import sys
 import traceback
 
+from argparse import ArgumentParser
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from functools import partial
+from typing import Callable
 from zoneinfo import ZoneInfo
 
 from protocol_proxy.ipc import callback, ProtocolProxyMessage
-from protocol_proxy.proxy import launch
 from protocol_proxy.proxy.asyncio import AsyncioProtocolProxy
+from protocol_proxy.proxy.launch import launch, redact
 
 from .bacnet import BACnet
 from .bacnet_utils import make_jsonable
@@ -408,6 +410,24 @@ class BACnetProxy(AsyncioProtocolProxy):
                                       #  (Ideally they are address and port.)
                                       #  Consider named tuple?
 
+async def run_proxy(local_interface, **kwargs) -> int:
+    _log.info(f'Launching BACnet Proxy at interface {local_interface} using parameters: {redact(kwargs)}.')
+    proxy = BACnetProxy(local_interface, **kwargs)    # Must be created inside the running event loop.
+    await proxy.start()
+    return 0
+
+
+def launch_bacnet(parser: ArgumentParser) -> tuple[ArgumentParser, Callable]:
+    parser.add_argument('--local-interface', type=str, required=True,
+                        help='Address on the local machine of this BACnet Proxy.')
+    parser.add_argument('--bacnet-port', type=int, default=0,
+                        help='The BACnet port as an offset from 47808.')
+    parser.add_argument('--vendor-id', type=int, default=999,
+                        help='The BACnet vendor ID to use for the local device of this BACnet Proxy.')
+    parser.add_argument('--object-name', type=str, default='VOLTTRON BACnet Proxy',
+                        help='The name of the local device for this BACnet Proxy.')
+    return parser, run_proxy
+
+
 if __name__ == '__main__':
-    from . import launch_bacnet
     sys.exit(launch(launch_bacnet))
