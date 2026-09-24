@@ -15,19 +15,8 @@ warn_unused_configs = true
 show_error_codes = true
 exclude = ['docs/']
 
-[tool.mypy-gevent]
-ignore_missing_imports = true
-
-[tool.mypy-mock]
-ignore_missing_imports = true
-
-[tool.mypy-pytest]
-ignore_missing_imports = true
-
-[tool.mypy-pytz]
-ignore_missing_imports = true
-
-[tool.mypy-volttron]
+[[tool.mypy.overrides]]
+module = ["bacpypes3.*", "gevent.*", "mock.*", "pytest.*", "pytz.*", "volttron.*"]
 ignore_missing_imports = true
 
 [tool.poetry]
