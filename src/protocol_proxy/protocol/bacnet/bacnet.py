@@ -26,17 +26,27 @@ _log = logging.getLogger(__name__)
 
 class BACnet:
     def __init__(self, local_interface, bacnet_port=0, vendor_id=999, object_name='VOLTTRON BACnet Proxy',
-                 device_info_cache=None, router_info_cache=None, ase_id=None, **_):
-        #_log.debug('WELCOME BAC')
+                 device_info_cache=None, router_info_cache=None, ase_id=None,
+                 apdu_timeout: float = 3.0, apdu_retries: int = 3, **_):
+        """
+        :param apdu_timeout: seconds to wait for a device to answer one request before retrying.
+        :param apdu_retries: number of retries after the first attempt. A silent device therefore costs
+            apdu_timeout * (apdu_retries + 1) seconds per request.
+        """
         vendor_info = get_vendor_info(vendor_id)
         device_object_class = vendor_info.get_object_class(ObjectType.device)
-        device_object = device_object_class(objectIdentifier=('device', vendor_id), objectName=object_name)
+        # bacpypes3's client state machine takes its timeout and retry count from the local device object.
+        device_object = device_object_class(objectIdentifier=('device', vendor_id), objectName=object_name,
+                                            apduTimeout=int(apdu_timeout * 1000), numberOfApduRetries=apdu_retries)
         network_port_object_class = vendor_info.get_object_class(ObjectType.networkPort)
+        # bacnet_port is an offset from the standard port (so 0 is 47808), as the driver configures it; an absolute
+        # port number is also accepted for convenience.
+        udp_port = self.udp_port(bacnet_port)
         network_port_object = network_port_object_class(local_interface,
-                                                        objectIdentifier=("network-port", bacnet_port),
-                                                        objectName="NetworkPort-1", networkNumber=bacnet_port,
+                                                        objectIdentifier=("network-port", 1),
+                                                        objectName="NetworkPort-1", networkNumber=0,
                                                         networkNumberQuality="configured",
-                                                        bacnetIPUDPPort=bacnet_port)
+                                                        bacnetIPUDPPort=udp_port)
         # TODO: In order to implement better error handling, it may be necessary to sublcass Application.
         #       BACPypes3 raises an AssertionError, for instance in the Application.confirmation which does not
         #       seem to be possible to catch without overriding the method.
@@ -48,6 +58,15 @@ class BACnet:
             router_info_cache=router_info_cache,
             aseID=ase_id
         )
+
+    BACNET_STANDARD_PORT = 47808
+
+    @classmethod
+    def udp_port(cls, bacnet_port: int) -> int:
+        """Resolve a configured port (offset from 47808, or an absolute port) to the UDP port to bind."""
+        if bacnet_port < 0:
+            raise ValueError(f"bacnet_port must be non-negative, got {bacnet_port}")
+        return bacnet_port if bacnet_port >= 1024 else cls.BACNET_STANDARD_PORT + bacnet_port
 
     async def query_device(self, address: str, property_name: str = 'object-identifier'):
         """Returns properties about the device at the given address.
