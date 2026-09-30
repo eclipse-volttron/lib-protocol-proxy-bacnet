@@ -45,6 +45,14 @@ def _serialize(val):
             "error": "ErrorRejectAbortNack",
             "details": str(val)
         }
+    elif hasattr(val, 'errorClass') and hasattr(val, 'errorCode'):
+        # e.g. bacpypes3 ErrorType, returned per-property by ReadPropertyMultiple
+        err_val = {
+            "error": val.__class__.__name__,
+            "error_class": str(val.errorClass),
+            "error_code": str(val.errorCode),
+            "details": f"{val.errorClass}: {val.errorCode}"
+        }
     elif hasattr(val, '__class__') and 'Error' in val.__class__.__name__:
         err_val = {
             "error": val.__class__.__name__,

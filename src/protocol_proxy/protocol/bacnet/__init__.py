@@ -1,32 +1,20 @@
+"""BACnet plugin for protocol_proxy.
+
+Proxies are launched with ``python -m protocol_proxy.proxy <module>:<class>`` (see protocol_proxy.proxy.launch), so
+this package may import its proxy class directly.
+"""
 import logging
 
-from argparse import ArgumentParser
-from typing import Callable
-
 from .bacnet import BACnet
-from .bacnet_proxy import BACnetProxy
+from .bacnet_proxy import BACnetProxy, launch_bacnet, run_proxy
+
+__all__ = ['BACnet', 'BACnetProxy', 'PROXY_CLASS', 'launch_bacnet', 'run_bacnet_device', 'run_proxy']
 
 PROXY_CLASS = BACnetProxy
 
 _log = logging.getLogger(__name__)
 
-async def run_proxy(local_interface, **kwargs):
-    _log.info(f'Launching BACnet Proxy at interface {local_interface} using parameters: {kwargs}.')
-    bp = BACnetProxy(local_interface, **kwargs)
-    await bp.start()
 
 async def run_bacnet_device(local_interface, **kwargs):
-    print(f'Launching BACnet Device at interface {local_interface} using parameters: {kwargs}.')
+    _log.info(f'Launching BACnet Device at interface {local_interface} using parameters: {kwargs}.')
     return BACnet(local_interface, **kwargs)
-
-
-def launch_bacnet(parser: ArgumentParser) -> tuple[ArgumentParser, Callable]:
-    parser.add_argument('--local-interface', type=str, required=True,
-                        help='Address on the local machine of this BACnet Proxy.')
-    parser.add_argument('--bacnet-port', type=int, default=0,
-                        help='The BACnet port as an offset from 47808.')
-    parser.add_argument('--vendor-id', type=int, default=999,
-                        help='The BACnet vendor ID to use for the local device of this BACnet Proxy.')
-    parser.add_argument('--object-name', type=str, default='VOLTTRON BACnet Proxy',
-                        help='The name of the local device for this BACnet Proxy.')
-    return parser, run_proxy

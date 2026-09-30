@@ -4,14 +4,16 @@ import logging
 import sys
 import traceback
 
-from dataclasses import dataclass
+from argparse import ArgumentParser
+from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from functools import partial
+from typing import Callable
 from zoneinfo import ZoneInfo
 
 from protocol_proxy.ipc import callback, ProtocolProxyMessage
-from protocol_proxy.proxy import launch
 from protocol_proxy.proxy.asyncio import AsyncioProtocolProxy
+from protocol_proxy.proxy.launch import launch, redact
 
 from .bacnet import BACnet
 from .bacnet_utils import make_jsonable
@@ -26,20 +28,35 @@ class COVSubscription:
     address: str
     object_identifier: str
     confirmed: bool | None
-    lifetime: bool | None
-    stop_event: asyncio.Event = asyncio.Event()
+    lifetime: float | None
+    # One event per subscription: a shared default instance would stop every subscription when any one is cancelled.
+    stop_event: asyncio.Event = field(default_factory=asyncio.Event)
 
-    def is_unchanged(self, address: str, object_identifier: str, confirmed: bool | None, lifetime: bool | None) -> bool:
+    def is_unchanged(self, address: str, object_identifier: str, confirmed: bool | None, lifetime: float | None) -> bool:
         return (address == self.address and object_identifier == self.object_identifier
-                and confirmed == confirmed and lifetime == lifetime)
+                and confirmed == self.confirmed and lifetime == self.lifetime)
 
 class BACnetProxy(AsyncioProtocolProxy):
+    LAUNCHER = 'launch_bacnet'
+
+    # BatchRead works through one device's references sequentially, in ReadPropertyMultiple chunks of ten. A silent
+    # device costs a full APDU timeout-and-retry cycle per chunk, plus a Who-Is and a protocol-services read when it is
+    # first seen. The IPC limit on BATCH_READ must outlast that, or the proxy abandons the batch at the same moment
+    # the driver stops waiting.
+    RPM_CHUNK_SIZE = 10
+    DEFAULT_BATCH_CHUNKS = 3          # 24 points at the driver's default max_per_request
+    SETUP_CYCLES = 2                  # Who-Is + protocol-services-supported
+    MIN_CALLBACK_TIMEOUT = 30.0
+
     def __init__(self, local_interface, bacnet_port=0, vendor_id=999, object_name='VOLTTRON BACnet Proxy',
+                 apdu_timeout: float = 3.0, apdu_retries: int = 3, batch_read_timeout: float | None = None,
                  **kwargs):
-        #_log.debug('IN BACNET PROXY __init__')
         super(BACnetProxy, self).__init__(**kwargs)
-        self.bacnet = BACnet(local_interface, bacnet_port, vendor_id, object_name, **kwargs)
+        self.bacnet = BACnet(local_interface, bacnet_port, vendor_id, object_name,
+                             apdu_timeout=apdu_timeout, apdu_retries=apdu_retries, **kwargs)
         self.loop = asyncio.get_event_loop()
+        self.request_timeout, self.batch_read_timeout = self.callback_timeouts(apdu_timeout, apdu_retries,
+                                                                               batch_read_timeout)
         
         # Cache for object-list to avoid re-reading on every page request
         # Format: {device_key: (object_list, timestamp)}
@@ -48,23 +65,30 @@ class BACnetProxy(AsyncioProtocolProxy):
         self._subscribed_cov: dict[str, COVSubscription] = {}
         self._time_sync_periodics = {}
 
-        self.register_callback(self.batch_read_endpoint, 'BATCH_READ', provides_response=True)
+        self.register_callback(self.batch_read_endpoint, 'BATCH_READ', provides_response=True,
+                               timeout=self.batch_read_timeout)
         #self.register_callback(self.confirmed_private_transfer_endpoint, 'CONFIRMED_PRIVATE_TRANSFER', provides_response=True)
         self.register_callback(self.cov_setup_endpoint, 'SETUP_COV', provides_response=False)
         self.register_callback(self.cov_cancel_endpoint, 'CANCEL_COV', provides_response=False)
-        self.register_callback(self.query_device_endpoint, 'QUERY_DEVICE', provides_response=True)
-        self.register_callback(self.read_property_endpoint, 'READ_PROPERTY', provides_response=True)
+        self.register_callback(self.query_device_endpoint, 'QUERY_DEVICE', provides_response=True,
+                               timeout=self.request_timeout)
+        self.register_callback(self.read_property_endpoint, 'READ_PROPERTY', provides_response=True,
+                               timeout=self.request_timeout)
         #self.register_callback(self.read_property_multiple_endpoint, 'READ_PROPERTY_MULTIPLE', provides_response=True)
-        self.register_callback(self.time_synchronization_endpoint, 'TIME_SYNCHRONIZATION', provides_response=True)
+        self.register_callback(self.time_synchronization_endpoint, 'TIME_SYNCHRONIZATION', provides_response=True,
+                               timeout=self.request_timeout)
         self.register_callback(self.setup_time_synchronization_endpoint, 'SETUP_TIME_SYNCHRONIZATION', provides_response=False)
-        self.register_callback(self.write_property_endpoint, 'WRITE_PROPERTY', provides_response=True)
-        self.register_callback(self.read_device_all_endpoint, 'READ_DEVICE_ALL', provides_response=True)
-        self.register_callback(self.who_is_endpoint, 'WHO_IS', provides_response=True)
+        self.register_callback(self.write_property_endpoint, 'WRITE_PROPERTY', provides_response=True,
+                               timeout=self.request_timeout)
+        self.register_callback(self.read_device_all_endpoint, 'READ_DEVICE_ALL', provides_response=True,
+                               timeout=self.batch_read_timeout)
+        self.register_callback(self.who_is_endpoint, 'WHO_IS', provides_response=True, timeout=self.request_timeout)
         self.register_callback(self.scan_subnet_endpoint, 'SCAN_SUBNET', provides_response=True, timeout=300)
         self.register_callback(self.read_object_list_names_endpoint, 'READ_OBJECT_LIST_NAMES', provides_response=True, timeout=300)
         self.register_callback(self.read_object_list_names_endpoint, 'READ_OBJECT_LIST', provides_response=True, timeout=300)
         self.register_callback(self.clear_cache_endpoint, 'CLEAR_CACHE', provides_response=True)
         self.register_callback(self.get_cache_stats_endpoint, 'GET_CACHE_STATS', provides_response=True)
+        self.register_callback(self.get_cached_devices_endpoint, 'GET_CACHED_DEVICES', provides_response=True)
 
     @callback
     async def batch_read_endpoint(self, _, raw_message: bytes):
@@ -180,7 +204,8 @@ class BACnetProxy(AsyncioProtocolProxy):
         time_zone_string = message.get('time_zone')
         if interval_string is None:
             task = self._time_sync_periodics.pop(address, None)
-            task.cancel()
+            if task is not None:
+                task.cancel()
         else:
             interval_seconds = timedelta(seconds=float(interval_string))
             time_zone = ZoneInfo(time_zone_string)
@@ -401,6 +426,21 @@ class BACnetProxy(AsyncioProtocolProxy):
             return json.dumps({"error": str(e)}).encode('utf8')
 
     @classmethod
+    def callback_timeouts(cls, apdu_timeout: float, apdu_retries: int,
+                          batch_read_timeout: float | None = None) -> tuple[float, float]:
+        """(single-request limit, batch-read limit) in seconds, derived from the APDU settings.
+
+        A single request is allowed two full timeout-and-retry cycles (one for the request, one for a device lookup
+        it may trigger). A batch, unless given explicitly, is allowed DEFAULT_BATCH_CHUNKS cycles plus setup cycles.
+        Neither drops below MIN_CALLBACK_TIMEOUT.
+        """
+        cycle = apdu_timeout * (apdu_retries + 1)
+        request_timeout = max(cls.MIN_CALLBACK_TIMEOUT, 2 * cycle)
+        if batch_read_timeout is None:
+            batch_read_timeout = cycle * (cls.DEFAULT_BATCH_CHUNKS + cls.SETUP_CYCLES)
+        return request_timeout, max(cls.MIN_CALLBACK_TIMEOUT, batch_read_timeout)
+
+    @classmethod
     def get_unique_remote_id(cls, unique_remote_id: tuple) -> tuple:
         """Get a unique identifier for the proxy server
          given a unique_remote_id and protocol-specific set of parameters."""
@@ -408,6 +448,28 @@ class BACnetProxy(AsyncioProtocolProxy):
                                       #  (Ideally they are address and port.)
                                       #  Consider named tuple?
 
-if __name__ == '__main__':
-    from . import launch_bacnet
-    sys.exit(launch(launch_bacnet))
+async def run_proxy(local_interface, **kwargs) -> int:
+    _log.info(f'Launching BACnet Proxy at interface {local_interface} using parameters: {redact(kwargs)}.')
+    proxy = BACnetProxy(local_interface, **kwargs)    # Must be created inside the running event loop.
+    await proxy.start()
+    return 0
+
+
+def launch_bacnet(parser: ArgumentParser) -> tuple[ArgumentParser, Callable]:
+    parser.add_argument('--local-interface', type=str, required=True,
+                        help='Address on the local machine of this BACnet Proxy.')
+    parser.add_argument('--bacnet-port', type=int, default=0,
+                        help='The BACnet port as an offset from 47808.')
+    parser.add_argument('--vendor-id', type=int, default=999,
+                        help='The BACnet vendor ID to use for the local device of this BACnet Proxy.')
+    parser.add_argument('--object-name', type=str, default='VOLTTRON BACnet Proxy',
+                        help='The name of the local device for this BACnet Proxy.')
+    parser.add_argument('--apdu-timeout', type=float, default=3.0,
+                        help='Seconds to wait for a device to answer one request before retrying.')
+    parser.add_argument('--apdu-retries', type=int, default=3,
+                        help='Retries after the first attempt of each request.')
+    parser.add_argument('--batch-read-timeout', type=float, default=None,
+                        help='Seconds the proxy allows a BATCH_READ before abandoning it. Defaults from the APDU'
+                             ' settings; see BACnetProxy.callback_timeouts.')
+    return parser, run_proxy
+
