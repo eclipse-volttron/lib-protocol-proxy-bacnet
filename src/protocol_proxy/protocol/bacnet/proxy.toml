@@ -1,0 +1,10 @@
+# Manifest for the bacnet protocol proxy: what a manager needs to launch it and key its processes.
+# Read by protocol_proxy.manifest (see PROTOCOL.md, "Manifests"); nothing in it is executable.
+
+[proxy]
+name = "bacnet"
+command = ["{python}", "-m", "protocol_proxy.proxy", "protocol_proxy.protocol.bacnet.bacnet_proxy:BACnetProxy"]
+header_version = 2
+
+[identity]
+keys = ["local_interface", "bacnet_port"]      # one process per local interface and port

@@ -36,6 +36,23 @@ for contributing to this and/or other VOLTTRON repositories.
 
 [//]: # (in your VOLTTRON agent or other applications.)
 
+## Served devices (role server)
+
+Besides reaching devices for its callers, the proxy serves BACnet/IP devices. `REGISTER_REMOTE` with `role: server`,
+`local_interface`, `port` (an offset from 47808 or an absolute port, distinct from the proxy's own), `device_id`,
+`object_name` and `points` creates a bacpypes3 application of its own for the served device: one local object per point
+(analog, binary or multi-state input, output or value; `object_type`, `instance`, `units`, `number_of_states`,
+`cov_increment`), each answering ReadProperty, ReadPropertyMultiple, WhoIs and SubscribeCOV. `remote_writable` says
+whether peers may write a point's present value (outputs and values by default, inputs never); such objects are
+commandable, so a peer's priority array applies and relinquishing returns the platform's value, which is the relinquish
+default. Writes to other points are refused with write-access-denied.
+
+`WRITE_POINTS` (`values`) sets present values from the platform, `READ_POINTS` (`topics`) reports them, and a peer's
+accepted writes are pushed as `RECEIVE_COV` (the same message as change-of-value pushes) tagged with the caller's remote
+id. Registration `values` seed points nothing has written, ahead of `initial_value`; re-registration keeps the values
+of points that stay; `CLOSE_REMOTE` stops the served device. Replies to these messages carry plain platform values
+(`{"result": ..., "error": ...}`).
+
 # Disclaimer Notice
 
 This material was prepared as an account of work sponsored by an agency of the

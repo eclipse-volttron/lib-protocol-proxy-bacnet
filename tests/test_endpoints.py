@@ -1,6 +1,7 @@
 """BACnetProxy IPC endpoints, driven through the real IPC base class with the BACnet wrapper replaced by a fake."""
 import asyncio
 import json
+from uuid import uuid4
 
 from types import SimpleNamespace
 from unittest import mock
@@ -115,9 +116,10 @@ def test_cov_setup_starts_subscription_and_forwards_values(fake_bacnet_class):
         headers = SimpleNamespace(sender_id='driver-1')
         proxy.peers['driver-1'] = peer
         proxy.send = mock.AsyncMock()
+        remote = uuid4()
         sub = dict(subscription_key='campus/b/dev/Temp', device_address='10.0.0.5',
                    monitored_object_identifier='analogInput:1', property_identifier='present-value',
-                   issue_confirmed_notifications=True, lifetime=180.0)
+                   issue_confirmed_notifications=True, lifetime=180.0, remote_id=remote.hex)
         await call(proxy, 'SETUP_COV', headers=headers, **sub)
         await asyncio.sleep(0)
         assert 'campus/b/dev/Temp' in proxy._subscribed_cov
@@ -140,6 +142,7 @@ def test_cov_setup_starts_subscription_and_forwards_values(fake_bacnet_class):
         await kwargs['cov_callback'](72.5)
         (sent_peer, message), _ = proxy.send.call_args
         assert sent_peer is peer and message.method_name == 'RECEIVE_COV'
+        assert message.remote_id == remote                      # routed to the caller that subscribed
         assert json.loads(message.payload) == {'result': {'campus/b/dev/Temp': 72.5}, 'error': {}}
 
         # Subscriptions have independent stop events: cancelling one leaves the other running.
@@ -222,4 +225,8 @@ def test_cache_endpoints(fake_bacnet_class):
 
 
 def test_unique_remote_id_is_local_interface_and_port():
-    assert BACnetProxy.get_unique_remote_id(('10.0.0.1/24', 3, 'extra')) == ('10.0.0.1/24', 3)
+    # One process per local interface and port: the manifest's identity keys, not a positional convention.
+    from pathlib import Path
+    from protocol_proxy.manifest import Manifest
+    manifest = Manifest.load(Path(__file__).parents[1] / 'src' / 'protocol_proxy' / 'protocol' / 'bacnet' / 'proxy.toml')
+    assert manifest.process_key(('anything',), {'local_interface': '10.0.0.1/24', 'bacnet_port': 3, 'extra': 1}) == ('bacnet', '10.0.0.1/24', 3)

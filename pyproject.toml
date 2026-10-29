@@ -39,6 +39,9 @@ classifiers = [
     "License :: OSI Approved :: Apache Software License"
 ]
 
+[tool.poetry.plugins."protocol_proxy.manifests"]
+bacnet = "protocol_proxy.protocol.bacnet:proxy.toml"
+
 [tool.poetry.dependencies]
 python = ">=3.10,<4.0"
 bacpypes3 = ">=0.0.102"

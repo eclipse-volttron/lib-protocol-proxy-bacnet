@@ -1,5 +1,6 @@
 import asyncio
 import json
+from uuid import UUID
 import logging
 import sys
 import traceback
@@ -19,6 +20,7 @@ from .bacnet import BACnet
 from .bacnet_utils import make_jsonable
 from .cache_handler import (_clear_cache_for_device, _get_cache_stats)
 from .json import serialize
+from .server import ServedBACnetDevice
 
 _log = logging.getLogger(__name__)
 
@@ -37,6 +39,11 @@ class COVSubscription:
                 and confirmed == self.confirmed and lifetime == self.lifetime)
 
 class BACnetProxy(AsyncioProtocolProxy):
+    """The BACnet proxy: a client application on the local interface reaching devices for its callers, and any number
+    of served devices (role ``server``), each its own BACnet/IP device on a port of its own, registered with
+    REGISTER_REMOTE and read and written by topic (READ_POINTS, WRITE_POINTS); a peer's accepted writes are pushed as
+    RECEIVE_COV tagged with the caller's remote id, the same message as change-of-value pushes.
+    """
     LAUNCHER = 'launch_bacnet'
 
     # BatchRead works through one device's references sequentially, in ReadPropertyMultiple chunks of ten. A silent
@@ -64,6 +71,13 @@ class BACnetProxy(AsyncioProtocolProxy):
         self._cache_timeout = 300
         self._subscribed_cov: dict[str, COVSubscription] = {}
         self._time_sync_periodics = {}
+        self.servers: dict[str, ServedBACnetDevice] = {}          # served devices, by interface, port and instance
+        self.remotes: dict[UUID, ServedBACnetDevice] = {}          # by the caller's remote id
+        self.register_callback(self.register_remote_endpoint, 'REGISTER_REMOTE', provides_response=True,
+                               timeout=self.request_timeout)
+        self.register_callback(self.read_points_endpoint, 'READ_POINTS', provides_response=True, timeout=self.request_timeout)
+        self.register_callback(self.write_points_endpoint, 'WRITE_POINTS', provides_response=True, timeout=self.request_timeout)
+        self.register_callback(self.close_remote_endpoint, 'CLOSE_REMOTE', provides_response=True, timeout=self.request_timeout)
 
         self.register_callback(self.batch_read_endpoint, 'BATCH_READ', provides_response=True,
                                timeout=self.batch_read_timeout)
@@ -90,6 +104,93 @@ class BACnetProxy(AsyncioProtocolProxy):
         self.register_callback(self.get_cache_stats_endpoint, 'GET_CACHE_STATS', provides_response=True)
         self.register_callback(self.get_cached_devices_endpoint, 'GET_CACHED_DEVICES', provides_response=True)
 
+    # ---- served devices (role server) ----------------------------------------------------------------------------
+    @staticmethod
+    def _reply(result=None, error=None) -> bytes:
+        """Served replies carry plain platform values, so they bypass the BACnet object serializer."""
+        return json.dumps({'result': result if result is not None else {}, 'error': error if error is not None else {}}).encode('utf8')
+
+    @staticmethod
+    def server_key(message: dict) -> str:
+        return f"{message.get('local_interface')}:{message.get('port')}:{message.get('device_id')}"
+
+    @callback
+    async def register_remote_endpoint(self, headers, raw_message: bytes):
+        """Serve a BACnet device. Payload: ``role`` (``server``), ``local_interface``, ``port`` (offset from 47808 or an
+        absolute port; must differ from this proxy's own), ``device_id``, ``object_name``, ``points`` (``{topic,
+        object_type, instance, property, units, remote_writable, initial_value, number_of_states, cov_increment}``)
+        and optionally ``values`` (the caller's current values for points nothing has written). Reply: ``{'server':
+        key, 'points': n, 'seeded': m, 'port': udp port}``; everything held is pushed as RECEIVE_COV."""
+        message = json.loads(raw_message.decode('utf8'))
+        remote_id = getattr(headers, 'remote_id', None)
+        if remote_id is None:
+            return self._reply(error={'device': 'Registration needs the remote id in its header (version 2).'})
+        if str(message.get('role') or 'server').lower() not in ('server', 'outstation', 'slave'):
+            return self._reply(error={'device': 'The BACnet proxy registers served devices only (role server); clients need no registration.'})
+        for field_name in ('local_interface', 'port', 'device_id'):
+            if message.get(field_name) in (None, ''):
+                return self._reply(error={'device': f'A served BACnet device needs {field_name}.'})
+        key = self.server_key(message)
+        served = self.servers.get(key)
+        try:
+            if served is None:
+                served = ServedBACnetDevice(str(message['local_interface']), int(message['port']), device_id=int(message['device_id']),
+                                            object_name=str(message.get('object_name') or 'VOLTTRON served device'),
+                                            vendor_id=int(message.get('vendor_id') or 999))
+                served.push = partial(self._push_served, served)
+            served.remote_id = remote_id
+            count = served.configure_points(message.get('points') or [])
+            await served.start(message.get('values') or {})
+        except Exception as e:
+            _log.warning(f'Failed to serve BACnet device {key}: {e}')
+            if served is not None and key not in self.servers:
+                await served.close()
+            return self._reply(error={'device': str(e)})
+        self.servers[key] = served
+        self.remotes[remote_id] = served
+        self.loop.create_task(served.push_all())
+        return self._reply({'server': key, 'points': count, 'seeded': served.seeded, 'port': served.udp_port(served.port)})
+
+    async def _push_served(self, served: ServedBACnetDevice, values: dict):
+        peer = self.peers.get(self.manager)
+        if peer is None:    # pragma: no cover
+            return
+        await self.send(peer, ProtocolProxyMessage(method_name='RECEIVE_COV', payload=self._reply(values), remote_id=served.remote_id))
+
+    def _served(self, headers, action: str) -> ServedBACnetDevice | None:
+        remote_id = getattr(headers, 'remote_id', None)
+        served = self.remotes.get(remote_id) if remote_id else None
+        if served is None:
+            _log.warning(f'Failed to {action}: remote {remote_id} has no served device.')
+        return served
+
+    @callback
+    async def read_points_endpoint(self, headers, raw_message: bytes):
+        message = json.loads(raw_message.decode('utf8'))
+        served = self._served(headers, 'read points')
+        if served is None:
+            return self._reply(error={'device': 'No served device for this remote.'})
+        results, errors = await served.read(message.get('topics'))
+        return self._reply(results, errors)
+
+    @callback
+    async def write_points_endpoint(self, headers, raw_message: bytes):
+        message = json.loads(raw_message.decode('utf8'))
+        served = self._served(headers, 'write points')
+        if served is None:
+            return self._reply(error={'device': 'No served device for this remote.'})
+        results, errors = await served.write(message.get('values') or {})
+        return self._reply(results, errors)
+
+    @callback
+    async def close_remote_endpoint(self, headers, raw_message: bytes):
+        remote_id = getattr(headers, 'remote_id', None)
+        served = self.remotes.pop(remote_id, None) if remote_id else None
+        if served is not None:
+            self.servers = {k: s for k, s in self.servers.items() if s is not served}
+            await served.close()
+        return self._reply({'closed': served is not None})
+
     @callback
     async def batch_read_endpoint(self, _, raw_message: bytes):
         """Endpoint to gracefully handle read multiple with fallback to single reads."""
@@ -112,10 +213,13 @@ class BACnetProxy(AsyncioProtocolProxy):
     #     result = await self.bacnet.confirmed_private_transfer(address, vendor_id, service_number, service_parameters)
     #     return serialize(result)
 
-    async def cov_callback_function(self, peer, key, value):
+    async def cov_callback_function(self, peer, key, remote_id, value):
+        """Push one change of value to the subscriber, tagged with the remote id it subscribed with (if any) so the
+        manager routes it to that caller."""
         message = ProtocolProxyMessage(
             method_name='RECEIVE_COV',
-            payload=serialize({key: value})
+            payload=serialize({key: value}),
+            remote_id=remote_id
             )
         #_log.debug(f'@@@@@@ SENDING COV CALLBACK: {message}')
         await self.send(peer, message)
@@ -131,6 +235,12 @@ class BACnetProxy(AsyncioProtocolProxy):
         property_identifier = message['property_identifier']
         confirmed = message['issue_confirmed_notifications']
         lifetime = message['lifetime']
+        remote_id = None
+        if raw_remote := message.get('remote_id'):
+            try:
+                remote_id = UUID(str(raw_remote))
+            except ValueError:
+                _log.warning(f'Ignoring malformed remote_id {raw_remote!r} on COV subscription {key}')
         if existing := self._subscribed_cov.get(key):
             if existing.is_unchanged(address, object_identifier, confirmed, lifetime):
                 return
@@ -139,7 +249,7 @@ class BACnetProxy(AsyncioProtocolProxy):
                 self._subscribed_cov.pop(key)
         # TODO: What happens if remote has existing subscription that was lost on this end?
         self._subscribed_cov[key] = COVSubscription(address, object_identifier, confirmed, lifetime)
-        cov_callback = partial(self.cov_callback_function, peer, key)
+        cov_callback = partial(self.cov_callback_function, peer, key, remote_id)
         self.loop.create_task(self.bacnet.change_of_value(device_address=address, object_identifier=object_identifier,
                                           process_identifier=None, confirmed=confirmed, lifetime=lifetime,
                                           stop_event=self._subscribed_cov[key].stop_event, cov_callback=cov_callback,
@@ -440,13 +550,6 @@ class BACnetProxy(AsyncioProtocolProxy):
             batch_read_timeout = cycle * (cls.DEFAULT_BATCH_CHUNKS + cls.SETUP_CYCLES)
         return request_timeout, max(cls.MIN_CALLBACK_TIMEOUT, batch_read_timeout)
 
-    @classmethod
-    def get_unique_remote_id(cls, unique_remote_id: tuple) -> tuple:
-        """Get a unique identifier for the proxy server
-         given a unique_remote_id and protocol-specific set of parameters."""
-        return unique_remote_id[0:2]  # TODO: How can we know what the first two params really are?
-                                      #  (Ideally they are address and port.)
-                                      #  Consider named tuple?
 
 async def run_proxy(local_interface, **kwargs) -> int:
     _log.info(f'Launching BACnet Proxy at interface {local_interface} using parameters: {redact(kwargs)}.')
